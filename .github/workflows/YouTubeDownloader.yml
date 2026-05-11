@@ -39,15 +39,16 @@ on:
 env:
   PYTHONUNBUFFERED: '1'
   DEBIAN_FRONTEND: 'noninteractive'
-  BALE_TOKEN: ${{ secrets.BALE_TOKEN }}         # توکن ربات بله
+  BALE_TOKEN: ${{ secrets.BALE_TOKEN }}
+  BALE_CHAT_ID: ${{ secrets.BALE_CHAT_ID }}
 
 jobs:
   download-and-upload:
     name: 🚀 Download & Upload to Bale
     runs-on: ubuntu-latest
-    timeout-minutes: 360        # برای پلی‌لیست طولانی
+    timeout-minutes: 360
     permissions:
-      contents: read            # فقط برای checkout
+      contents: read
 
     steps:
       - uses: actions/checkout@v4
@@ -62,6 +63,8 @@ jobs:
           python3 -c "import requests" 2>/dev/null || pip3 install -q requests
           command -v yt-dlp &>/dev/null || pip3 install -q yt-dlp
           command -v zip &>/dev/null || (sudo apt-get update -qq && sudo apt-get install -y -qq zip)
+          # 👇 ffmpeg for splitting videos
+          command -v ffmpeg &>/dev/null || (sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg)
 
       - name: 🔗 Prepare
         id: prep
@@ -80,6 +83,7 @@ jobs:
           QUALITY: ${{ github.event.inputs.quality }}
           MAX: ${{ github.event.inputs.max_videos }}
           BALE_TOKEN: ${{ secrets.BALE_TOKEN }}
+          BALE_CHAT_ID: ${{ secrets.BALE_CHAT_ID }}
         run: |
           python3 << 'PYEOF'
           import os, json, time, re, subprocess, sys, hashlib
@@ -93,7 +97,11 @@ jobs:
           Q = os.environ.get('QUALITY', '720')
           MX = int(os.environ.get('MAX', '0'))
           BALE_TOKEN = os.environ['BALE_TOKEN']
+          BALE_CHAT_ID = os.environ['BALE_CHAT_ID']
           BALE_API = f'https://tapi.bale.ai/bot{BALE_TOKEN}'
+
+          # ---------- Constants ----------
+          MAX_VIDEO_SIZE_MB = 45  # Slightly under Bale's 50 MB limit
 
           API = 'https://hub.ytconvert.org/api/download'
           H = {
@@ -254,6 +262,55 @@ jobs:
                   print(f'   ❌ Download error: {e}')
               return 0
 
+          # ---------- Video Splitting ----------
+          def split_video(video_path, max_size_mb=MAX_VIDEO_SIZE_MB):
+              """Split a video into chunks <= max_size_mb using FFmpeg (lossless stream copy)."""
+              size_mb = video_path.stat().st_size / 1e6
+              if size_mb <= max_size_mb:
+                  return [video_path]  # No split needed
+
+              duration = get_video_duration(video_path)
+              if not duration or duration <= 0:
+                  print("   ⚠️ Could not determine video duration, cannot split.")
+                  return []
+
+              # Number of chunks
+              n_chunks = int(size_mb / max_size_mb) + 1
+              chunk_duration = duration / n_chunks
+
+              print(f'   ✂️ Splitting {size_mb:.1f}MB video into {n_chunks} parts...')
+              parent = video_path.parent
+              stem = video_path.stem
+              ext = video_path.suffix
+
+              chunks = []
+              for i in range(n_chunks):
+                  start = i * chunk_duration
+                  end = (i + 1) * chunk_duration if i < n_chunks - 1 else duration
+                  chunk_path = parent / f'{stem}_part{i+1:02d}{ext}'
+                  cmd = [
+                      'ffmpeg', '-y', '-i', str(video_path),
+                      '-ss', str(start), '-to', str(end),
+                      '-c', 'copy', '-avoid_negative_ts', 'make_zero',
+                      str(chunk_path)
+                  ]
+                  subprocess.run(cmd, capture_output=True, check=True)
+                  chunks.append(chunk_path)
+                  print(f'      Chunk {i+1}/{n_chunks}: {chunk_path.stat().st_size/1e6:.1f}MB')
+
+              video_path.unlink()  # remove original
+              return chunks
+
+          def get_video_duration(filepath):
+              try:
+                  result = subprocess.run(
+                      ['ffprobe', '-v', 'error', '-show_entries', 'format=duration',
+                       '-of', 'default=noprint_wrappers=1:nokey=1', str(filepath)],
+                      capture_output=True, text=True, timeout=15
+                  )
+                  return float(result.stdout.strip())
+              except: return None
+
           # ---------- Bale Upload Functions ----------
           def bale_send_video(chat_id, video_path, caption=''):
               url = f'{BALE_API}/sendVideo'
@@ -261,7 +318,14 @@ jobs:
                   resp = rq.post(url,
                                  data={'chat_id': chat_id, 'caption': caption},
                                  files={'video': vid})
-              return resp.json()
+              # Log response for debugging
+              try:
+                  body = resp.json()
+                  print(f'      📬 Bale response: {json.dumps(body, indent=2)[:200]}')
+                  return body
+              except:
+                  print(f'      ❌ Bale raw response: {resp.text[:200]}')
+                  return {}
 
           def bale_send_document(chat_id, file_path, caption=''):
               url = f'{BALE_API}/sendDocument'
@@ -269,23 +333,21 @@ jobs:
                   resp = rq.post(url,
                                  data={'chat_id': chat_id, 'caption': caption},
                                  files={'document': f})
-              return resp.json()
+              try:
+                  return resp.json()
+              except:
+                  return {}
 
           # ---------- Main Logic ----------
           print(f'{"="*50}')
           print(f'🎬 {M.upper()} MODE')
           print(f'{"="*50}')
 
-          # You should set the BALE_CHAT_ID to your user/group ID
-          # For now we assume it's provided; you can fetch it by sending a message to the bot first.
-          CHAT_ID = os.environ.get('BALE_CHAT_ID', 'YOUR_CHAT_ID')   # Change this!
-
           if M in ('playlist', 'channel'):
               print('\n📋 Extracting videos...')
               v, cn = gvl(U, MX)
               if not v: print('❌ No videos found'); sys.exit(1)
 
-              # temp storage for info files
               tmpdir = Path('./upload_temp')
               tmpdir.mkdir(exist_ok=True)
 
@@ -299,7 +361,6 @@ jobs:
                       print('   ❌ Conversion failed, skipping...')
                       continue
 
-                  # Save video to a temp name
                   video_path = tmpdir / f'v_{x["id"]}.{result["e"]}'
                   size = download_file(result['u'], video_path)
                   if not size:
@@ -307,7 +368,10 @@ jobs:
                       continue
                   print(f'   ✅ Downloaded ({size/1e6:.1f}MB)')
 
-                  # Prepare info file content (like caption)
+                  # ---------- Split if too large ----------
+                  chunks = split_video(video_path)
+
+                  # Prepare info file
                   dur_str = f'{x["dr"]//60} minutes' if x['dr'] else 'Unknown'
                   info_text = (
                       f'🎬 {x["t"]}\n'
@@ -320,28 +384,32 @@ jobs:
                   info_path = tmpdir / f'info_{x["id"]}.md'
                   info_path.write_text(info_text)
 
-                  # Build English label E1, E2 ...
                   label = f'E{i}'
-                  caption = f'{label} - {x["t"]}'
 
-                  # 1) Upload video to Bale
-                  print(f'   📤 Uploading video to Bale as {label}...')
-                  bale_send_video(CHAT_ID, str(video_path), caption=caption)
+                  # Upload each chunk
+                  for idx, chunk_path in enumerate(chunks, 1):
+                      part_label = f'{label} (part {idx}/{len(chunks)})' if len(chunks) > 1 else label
+                      caption = f'{part_label} - {x["t"]}'
+                      print(f'   📤 Uploading {part_label} ({chunk_path.stat().st_size/1e6:.1f}MB)...')
+                      resp = bale_send_video(BALE_CHAT_ID, str(chunk_path), caption=caption)
+                      if resp.get('ok'):
+                          print(f'   ✅ Uploaded {part_label}')
+                      else:
+                          print(f'   ❌ Upload failed for {part_label}: {resp}')
+                      # Clean up chunk immediately
+                      chunk_path.unlink()
 
-                  # 2) Upload info file right after, referencing the video
+                  # Upload info file
                   print(f'   📄 Uploading info for {label}...')
                   info_caption = f'📝 اطلاعات ویدیوی بالا ({label})'
-                  bale_send_document(CHAT_ID, str(info_path), caption=info_caption)
-
-                  # Clean up temp files to save space
-                  video_path.unlink()
+                  bale_send_document(BALE_CHAT_ID, str(info_path), caption=info_caption)
                   info_path.unlink()
+
                   print(f'   ✅ Done with {label}')
                   if i < len(v): time.sleep(2)
 
               print(f'\n{"="*50}')
               print('🎉 All items processed and uploaded to Bale!')
           else:
-              # For single video or search, you can extend later
               print('Single/search mode not yet implemented for Bale. Use playlist.')
           PYEOF
