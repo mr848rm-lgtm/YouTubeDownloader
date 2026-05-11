@@ -34,7 +34,7 @@ on:
         description: '🔢 Max results (0 for all)'
         required: false
         type: number
-        default: 10
+        default: 20    # پیشنهاد: بین ۲۰ تا ۳۰
       split_threshold_mb:
         description: '📦 Split > MB (0=no)'
         required: false
@@ -52,7 +52,6 @@ jobs:
     timeout-minutes: 120
     permissions:
       contents: write
-      pull-requests: write
 
     steps:
       - uses: actions/checkout@v4
@@ -100,7 +99,7 @@ jobs:
           U = os.environ['URL']
           T = os.environ['TYPE']
           Q = os.environ.get('QUALITY', '720')
-          MX = int(os.environ.get('MAX', '10'))
+          MX = int(os.environ.get('MAX', '10'))   # مقدار پیش‌فرض ۱۰
           SP = int(os.environ.get('SPLIT', '50'))
 
           API = 'https://hub.ytconvert.org/api/download'
@@ -180,7 +179,7 @@ jobs:
           def gvl(u, n):
               channel_folder = get_channel_from_url(u)
               if not channel_folder and 'playlist' in u:
-                  print(f'   🔍 Detecting channel from playlist...')
+                  print('   🔍 Detecting channel from playlist...')
                   channel_folder = get_channel_from_playlist(u)
               if not channel_folder:
                   channel_folder = 'playlist_videos'
@@ -269,7 +268,7 @@ jobs:
                       d = rr.json()
                       su = d.get('statusUrl')
                       if not su: continue
-                      print(f'   ⏳ Converting...')
+                      print('   ⏳ Converting...')
                       for _ in range(60):
                           time.sleep(2)
                           try:
@@ -297,7 +296,7 @@ jobs:
                               done += len(chunk)
                               if total > 0 and done % (10*65536) == 0:
                                   print(f'\r   ⬇️ {done*100/total:.1f}%', end='')
-                      print(f'\r   ⬇️ 100.0%')
+                      print('\r   ⬇️ 100.0%')
                       return filepath.stat().st_size
               except Exception as e:
                   print(f'   ❌ Download error: {e}')
@@ -343,14 +342,14 @@ jobs:
               print(f'✅ {f}')
 
           elif M in ('playlist', 'channel'):
-              print(f'\n📋 Extracting videos...')
+              print('\n📋 Extracting videos...')
               v, cn = gvl(U, MX)
               if not v: print('❌ No videos found'); sys.exit(1)
 
               cd = Path(f'downloads/{cn}_videos')
               cd.mkdir(parents=True, exist_ok=True)
 
-              print(f'\n📝 Creating index...')
+              print('\n📝 Creating index...')
               mkidx(v, cn, cd)
 
               ok, fl = [], []
@@ -369,14 +368,14 @@ jobs:
                           split_file(fp, SP)
                           ok.append(x['t'])
                       else:
-                          print(f'   ❌ Download failed')
+                          print('   ❌ Download failed')
                           fl.append(x['t'])
                   else:
-                      print(f'   ❌ Conversion failed')
+                      print('   ❌ Conversion failed')
                       fl.append(x['t'])
                   
                   if i < len(v): 
-                      print(f'   ⏳ Waiting...')
+                      print('   ⏳ Waiting...')
                       time.sleep(2)
 
               Path('/tmp/meta.json').write_text(json.dumps({
@@ -385,7 +384,7 @@ jobs:
               print(f'\n{"="*50}')
               print(f'📊 {len(ok)}/{len(v)} downloaded successfully')
               if fl: print(f'❌ Failed: {fl}')
-              print(f'{"="*50}')
+              print('='*50)
 
           else:
               vid_match = re.search(r'(?:v=|/)([\w-]{11})', U)
@@ -405,16 +404,18 @@ jobs:
                   print('❌ Failed'); sys.exit(1)
           PYEOF
 
-      - name: 📤 Create Pull Request
-        uses: peter-evans/create-pull-request@v7
-        with:
-          commit-message: '📦 Download ${{ steps.prep.outputs.MODE }}'
-          branch: downloads-${{ github.run_id }}
-          delete-branch: true
-          title: '🎥 دانلود جدید (${{ steps.prep.outputs.MODE }})'
-          body: |
-            دانلود خودکار از:
-            ${{ github.event.inputs.url }}
-            
-            حالت: ${{ steps.prep.outputs.MODE }}
-            نوع: ${{ github.event.inputs.type }}
+      - name: 📤 Push Files
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "bot@github.com"
+          git add -A
+          TOTAL=$(git diff --cached --name-only | wc -l)
+          if [ "$TOTAL" -eq 0 ]; then
+            echo "Nothing to push"
+            exit 0
+          fi
+          echo "Committing and pushing $TOTAL files..."
+          git commit -m "📦 $(date +%m%d-%H%M) [skip ci]" --quiet
+          git pull --rebase --quiet
+          git push --quiet
+          echo "✅ Push successful"
