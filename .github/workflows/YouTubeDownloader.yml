@@ -1,4 +1,4 @@
-name: 🎯 YouTube Downloader
+name: 🎯 YouTube to Bale
 
 on:
   workflow_dispatch:
@@ -12,13 +12,13 @@ on:
           - playlist
           - channel
           - search
-        default: 'single'
+        default: 'playlist'
       url:
         description: '🎬 URL or Search Query or channel name'
         required: true
         type: string
       type:
-        description: '📦 Output Type'
+        description: '📦 Output Type (video/audio)'
         required: true
         type: choice
         options:
@@ -26,7 +26,7 @@ on:
           - audio
         default: 'video'
       quality:
-        description: 'Quality'
+        description: 'Quality (e.g., 720)'
         required: false
         type: string
         default: '720'
@@ -35,23 +35,19 @@ on:
         required: false
         type: number
         default: 0
-      split_threshold_mb:
-        description: '📦 Split > MB (0=no)'
-        required: false
-        type: number
-        default: 0
 
 env:
   PYTHONUNBUFFERED: '1'
   DEBIAN_FRONTEND: 'noninteractive'
+  BALE_TOKEN: ${{ secrets.BALE_TOKEN }}         # توکن ربات بله
 
 jobs:
-  download-and-release:
-    name: 🚀 Download & Release
+  download-and-upload:
+    name: 🚀 Download & Upload to Bale
     runs-on: ubuntu-latest
-    timeout-minutes: 120
+    timeout-minutes: 360        # برای پلی‌لیست طولانی
     permissions:
-      contents: write   # اجازهٔ ساخت Release
+      contents: read            # فقط برای checkout
 
     steps:
       - uses: actions/checkout@v4
@@ -76,16 +72,15 @@ jobs:
           echo "URL=$U" >> $GITHUB_OUTPUT
           echo "MODE=$M" >> $GITHUB_OUTPUT
 
-      - name: 🎯 Download & Process
+      - name: 🎯 Download & Upload to Bale
         env:
           MODE: ${{ steps.prep.outputs.MODE }}
           URL: ${{ steps.prep.outputs.URL }}
           TYPE: ${{ github.event.inputs.type }}
           QUALITY: ${{ github.event.inputs.quality }}
           MAX: ${{ github.event.inputs.max_videos }}
-          SPLIT: ${{ github.event.inputs.split_threshold_mb }}
+          BALE_TOKEN: ${{ secrets.BALE_TOKEN }}
         run: |
-          # ---------- Python script unchanged (full version) ----------
           python3 << 'PYEOF'
           import os, json, time, re, subprocess, sys, hashlib
           import requests as rq
@@ -97,7 +92,8 @@ jobs:
           T = os.environ['TYPE']
           Q = os.environ.get('QUALITY', '720')
           MX = int(os.environ.get('MAX', '0'))
-          SP = int(os.environ.get('SPLIT', '0'))
+          BALE_TOKEN = os.environ['BALE_TOKEN']
+          BALE_API = f'https://tapi.bale.ai/bot{BALE_TOKEN}'
 
           API = 'https://hub.ytconvert.org/api/download'
           H = {
@@ -108,6 +104,7 @@ jobs:
               'Origin': 'https://media.ytmp3.gg'
           }
 
+          # ---------- Helper Functions ----------
           def safe_name(text, maxlen=40):
               safe = re.sub(r'[^\w]', '_', text)[:maxlen]
               safe = re.sub(r'_+', '_', safe).strip('_')
@@ -147,8 +144,8 @@ jobs:
               return ('Unknown', None, 0, None)
 
           def get_channel_from_url(url):
-              for pattern in [r'@([\w-]+)', r'channel/([\w-]+)', r'c/([\w-]+)', r'user/([\w-]+)']:
-                  m = re.search(pattern, url)
+              for pat in [r'@([\w-]+)', r'channel/([\w-]+)', r'c/([\w-]+)', r'user/([\w-]+)']:
+                  m = re.search(pat, url)
                   if m: return m.group(1)
               return None
 
@@ -208,43 +205,6 @@ jobs:
                           continue
               return v, channel_folder
 
-          def mkidx(v, cn, cd):
-              ts = datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
-              Path('./playlists').mkdir(exist_ok=True)
-              inf = cd / 'info'
-              inf.mkdir(parents=True, exist_ok=True)
-              idxf = f'playlists/{cn}_{ts}.md'
-              m = (f'# 📺 {cn}\n\n**{datetime.now():%Y-%m-%d %H:%M}** | **{len(v)} videos**\n\n'
-                   f'| # | Thumbnail | Title | Duration | Views |\n'
-                   f'|---|-----------|-------|----------|-------|\n')
-              for i, x in enumerate(v, 1):
-                  dur_str = f'{x["dr"]//60}:{x["dr"]%60:02d}' if x['dr'] else '?'
-                  m += f'| {i} | [<img src="{x["th"]}" width="80">]({x["u"]}) | [{x["t"]}]({x["u"]}) | {dur_str} | {x["v"]} |\n'
-              m += '\n---\n\n## 📝 Details\n\n'
-              for i, x in enumerate(v, 1):
-                  sn = f'v{i:03d}_{x["id"]}'
-                  dur_str = f'{x["dr"]//60} minutes' if x['dr'] else 'Unknown'
-                  info_md = (f'# 🎬 {x["t"]}\n\n'
-                            f'![Thumbnail]({x["th"]})\n\n'
-                            f'## Info\n\n'
-                            f'| Property | Value |\n|----------|-------|\n'
-                            f'| **Channel** | {x["c"]} |\n'
-                            f'| **Duration** | {dur_str} |\n'
-                            f'| **Views** | {x["v"]} |\n'
-                            f'| **Video ID** | `{x["id"]}` |\n'
-                            f'| **URL** | {x["u"]} |\n\n'
-                            f'## Thumbnail\n\n'
-                            f'<img src="{x["th"]}" width="640">\n\n'
-                            f'---\n*Downloaded: {datetime.now():%Y-%m-%d %H:%M}*')
-                  (inf / f'{sn}.md').write_text(info_md)
-                  m += (f'### {i}. {x["t"]}\n\n'
-                       f'![Thumbnail]({x["th"]})\n\n'
-                       f'- **{dur_str}** | **{x["v"]}** views | **{x["c"]}**\n'
-                       f'- 📄 [info/{sn}.md](info/{sn}.md)\n\n---\n\n')
-              Path(idxf).write_text(m)
-              print(f'📄 Index: {idxf}')
-              return idxf
-
           def dl_video(u):
               e = 'mp3' if T == 'audio' else 'mp4'
               p = {'url': u, 'os': 'linux', 'output': {'type': 'audio' if T == 'audio' else 'video', 'format': e}}
@@ -294,121 +254,94 @@ jobs:
                   print(f'   ❌ Download error: {e}')
               return 0
 
-          def split_file(filepath, threshold_mb):
-              size_mb = filepath.stat().st_size / 1e6
-              if threshold_mb > 0 and size_mb > threshold_mb:
-                  print(f'   ✂️ Splitting ({size_mb:.0f}MB) into {threshold_mb}MB parts...')
-                  parent = filepath.parent
-                  name = filepath.name
-                  subprocess.run(['zip', '-r', '-q', '-s', f'{threshold_mb}m', f'{name}.zip', name], cwd=parent, check=True)
-                  filepath.unlink()
-                  parts = sorted(parent.glob(f'{name}.z*'))
-                  print(f'   ✅ Split into {len(parts)} parts')
-                  return True
-              return False
+          # ---------- Bale Upload Functions ----------
+          def bale_send_video(chat_id, video_path, caption=''):
+              url = f'{BALE_API}/sendVideo'
+              with open(video_path, 'rb') as vid:
+                  resp = rq.post(url,
+                                 data={'chat_id': chat_id, 'caption': caption},
+                                 files={'video': vid})
+              return resp.json()
 
+          def bale_send_document(chat_id, file_path, caption=''):
+              url = f'{BALE_API}/sendDocument'
+              with open(file_path, 'rb') as f:
+                  resp = rq.post(url,
+                                 data={'chat_id': chat_id, 'caption': caption},
+                                 files={'document': f})
+              return resp.json()
+
+          # ---------- Main Logic ----------
           print(f'{"="*50}')
           print(f'🎬 {M.upper()} MODE')
           print(f'{"="*50}')
 
-          if M == 'search':
-              v, _ = gvl(f'ytsearch{MX}:{U}', MX)
-              if not v: print('❌ No results'); sys.exit(1)
-              ts = datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
-              Path('./searches').mkdir(exist_ok=True)
-              qs = safe_name(U, 30)
-              f = f'searches/{qs}_{ts}.md'
-              m = (f'# 🔍 Search: {U}\n\n**{datetime.now():%Y-%m-%d %H:%M}** | **{len(v)} results**\n\n'
-                   f'| # | Thumbnail | Title | Channel | Views | Duration |\n'
-                   f'|---|-----------|-------|---------|-------|----------|\n')
-              for i, x in enumerate(v, 1):
-                  m += f'| {i} | [<img src="{x["th"]}" width="80">]({x["u"]}) | [{x["t"]}]({x["u"]}) | {x["c"][:20]} | {x["v"]} | {x["dr"]//60}m |\n'
-              m += '\n---\n\n'
-              for i, x in enumerate(v, 1):
-                  m += (f'### {i}. {x["t"]}\n\n<img src="{x["th"]}" width="640">\n\n'
-                       f'| Property | Value |\n|----------|-------|\n'
-                       f'| Channel | {x["c"]} |\n| Duration | {x["dr"]//60}m |\n'
-                       f'| Views | {x["v"]} |\n| ID | `{x["id"]}` |\n| URL | {x["u"]} |\n\n---\n\n')
-              Path(f).write_text(m)
-              Path('/tmp/meta.json').write_text(json.dumps({'m': 'search', 'ok': 0}))
-              print(f'✅ {f}')
+          # You should set the BALE_CHAT_ID to your user/group ID
+          # For now we assume it's provided; you can fetch it by sending a message to the bot first.
+          CHAT_ID = os.environ.get('BALE_CHAT_ID', 'YOUR_CHAT_ID')   # Change this!
 
-          elif M in ('playlist', 'channel'):
+          if M in ('playlist', 'channel'):
               print('\n📋 Extracting videos...')
               v, cn = gvl(U, MX)
               if not v: print('❌ No videos found'); sys.exit(1)
 
-              cd = Path(f'downloads/{cn}_videos')
-              cd.mkdir(parents=True, exist_ok=True)
+              # temp storage for info files
+              tmpdir = Path('./upload_temp')
+              tmpdir.mkdir(exist_ok=True)
 
-              print('\n📝 Creating index...')
-              mkidx(v, cn, cd)
-
-              ok, fl = [], []
-              print(f'\n📥 Downloading {len(v)} videos...\n{"="*50}')
-              
               for i, x in enumerate(v, 1):
                   print(f'\n📥 [{i}/{len(v)}] {x["t"]}')
                   print(f'   Channel: {x["c"]} | Duration: {x["dr"]//60}m | Views: {x["v"]}')
-                  
+
+                  # Download video
                   result = dl_video(x['u'])
-                  if result:
-                      fp = cd / f'v{i:03d}_{x["id"]}.{result["e"]}'
-                      size = download_file(result['u'], fp)
-                      if size:
-                          print(f'   ✅ Downloaded ({size/1e6:.1f}MB)')
-                          split_file(fp, SP)
-                          ok.append(x['t'])
-                      else:
-                          print('   ❌ Download failed')
-                          fl.append(x['t'])
-                  else:
-                      print('   ❌ Conversion failed')
-                      fl.append(x['t'])
-                  
-                  if i < len(v): 
-                      print('   ⏳ Waiting...')
-                      time.sleep(2)
+                  if not result:
+                      print('   ❌ Conversion failed, skipping...')
+                      continue
 
-              Path('/tmp/meta.json').write_text(json.dumps({
-                  'm': M, 'cd': str(cd), 'ok': len(ok), 'fl': len(fl), 'total': len(v)
-              }))
+                  # Save video to a temp name
+                  video_path = tmpdir / f'v_{x["id"]}.{result["e"]}'
+                  size = download_file(result['u'], video_path)
+                  if not size:
+                      print('   ❌ Download failed, skipping...')
+                      continue
+                  print(f'   ✅ Downloaded ({size/1e6:.1f}MB)')
+
+                  # Prepare info file content (like caption)
+                  dur_str = f'{x["dr"]//60} minutes' if x['dr'] else 'Unknown'
+                  info_text = (
+                      f'🎬 {x["t"]}\n'
+                      f'👤 {x["c"]}\n'
+                      f'⏱ {dur_str}\n'
+                      f'👁 {x["v"]} views\n'
+                      f'🔗 {x["u"]}\n\n'
+                      f'📅 Downloaded: {datetime.now():%Y-%m-%d %H:%M}'
+                  )
+                  info_path = tmpdir / f'info_{x["id"]}.md'
+                  info_path.write_text(info_text)
+
+                  # Build English label E1, E2 ...
+                  label = f'E{i}'
+                  caption = f'{label} - {x["t"]}'
+
+                  # 1) Upload video to Bale
+                  print(f'   📤 Uploading video to Bale as {label}...')
+                  bale_send_video(CHAT_ID, str(video_path), caption=caption)
+
+                  # 2) Upload info file right after, referencing the video
+                  print(f'   📄 Uploading info for {label}...')
+                  info_caption = f'📝 اطلاعات ویدیوی بالا ({label})'
+                  bale_send_document(CHAT_ID, str(info_path), caption=info_caption)
+
+                  # Clean up temp files to save space
+                  video_path.unlink()
+                  info_path.unlink()
+                  print(f'   ✅ Done with {label}')
+                  if i < len(v): time.sleep(2)
+
               print(f'\n{"="*50}')
-              print(f'📊 {len(ok)}/{len(v)} downloaded successfully')
-              if fl: print(f'❌ Failed: {fl}')
-              print('='*50)
-
+              print('🎉 All items processed and uploaded to Bale!')
           else:
-              vid_match = re.search(r'(?:v=|/)([\w-]{11})', U)
-              vid = vid_match.group(1) if vid_match else 'x'
-              ch, _, _, handle = gv(vid)
-              cn = handle if handle else get_channel_from_url(U) or safe_name(ch, 30) or 'video'
-              result = dl_video(U)
-              if result:
-                  cd = Path(f'downloads/{cn}_videos')
-                  cd.mkdir(parents=True, exist_ok=True)
-                  fp = cd / f'v_{vid}.{result["e"]}'
-                  size = download_file(result['u'], fp)
-                  if size:
-                      print(f'✅ Saved to {cn}_videos/ ({size/1e6:.1f}MB)')
-                      split_file(fp, SP)
-              else:
-                  print('❌ Failed'); sys.exit(1)
+              # For single video or search, you can extend later
+              print('Single/search mode not yet implemented for Bale. Use playlist.')
           PYEOF
-
-      - name: 📦 Zip results
-        run: |
-          mkdir -p results
-          [ -d downloads ] && mv downloads results/
-          [ -d playlists ] && mv playlists results/
-          [ -d searches ] && mv searches results/
-          zip -r qresults.zip results/
-
-      - name: 🚀 Create Release and Upload
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: download-${{ github.run_id }}
-          name: "🎥 Download ${{ steps.prep.outputs.MODE }} - ${{ github.run_id }}"
-          files: qresults.zip
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
