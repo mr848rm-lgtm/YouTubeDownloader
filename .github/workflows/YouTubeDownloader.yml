@@ -35,6 +35,11 @@ on:
         required: false
         type: number
         default: 0
+      bale_max_video_mb:
+        description: '📏 Max size per chunk (MB) for Bale (0 = no split)'
+        required: false
+        type: number
+        default: 49
 
 env:
   PYTHONUNBUFFERED: '1'
@@ -63,7 +68,6 @@ jobs:
           python3 -c "import requests" 2>/dev/null || pip3 install -q requests
           command -v yt-dlp &>/dev/null || pip3 install -q yt-dlp
           command -v zip &>/dev/null || (sudo apt-get update -qq && sudo apt-get install -y -qq zip)
-          # 👇 ffmpeg for splitting videos
           command -v ffmpeg &>/dev/null || (sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg)
 
       - name: 🔗 Prepare
@@ -84,6 +88,7 @@ jobs:
           MAX: ${{ github.event.inputs.max_videos }}
           BALE_TOKEN: ${{ secrets.BALE_TOKEN }}
           BALE_CHAT_ID: ${{ secrets.BALE_CHAT_ID }}
+          BALE_MAX_VIDEO_MB: ${{ github.event.inputs.bale_max_video_mb }}
         run: |
           python3 << 'PYEOF'
           import os, json, time, re, subprocess, sys, hashlib
@@ -98,10 +103,8 @@ jobs:
           MX = int(os.environ.get('MAX', '0'))
           BALE_TOKEN = os.environ['BALE_TOKEN']
           BALE_CHAT_ID = os.environ['BALE_CHAT_ID']
+          SPLIT_MB = int(os.environ.get('BALE_MAX_VIDEO_MB', '49')) or 0
           BALE_API = f'https://tapi.bale.ai/bot{BALE_TOKEN}'
-
-          # ---------- Constants ----------
-          MAX_VIDEO_SIZE_MB = 45  # Slightly under Bale's 50 MB limit
 
           API = 'https://hub.ytconvert.org/api/download'
           H = {
@@ -112,7 +115,7 @@ jobs:
               'Origin': 'https://media.ytmp3.gg'
           }
 
-          # ---------- Helper Functions ----------
+          # ---------- Helper Functions (unchanged) ----------
           def safe_name(text, maxlen=40):
               safe = re.sub(r'[^\w]', '_', text)[:maxlen]
               safe = re.sub(r'_+', '_', safe).strip('_')
@@ -262,45 +265,7 @@ jobs:
                   print(f'   ❌ Download error: {e}')
               return 0
 
-          # ---------- Video Splitting ----------
-          def split_video(video_path, max_size_mb=MAX_VIDEO_SIZE_MB):
-              """Split a video into chunks <= max_size_mb using FFmpeg (lossless stream copy)."""
-              size_mb = video_path.stat().st_size / 1e6
-              if size_mb <= max_size_mb:
-                  return [video_path]  # No split needed
-
-              duration = get_video_duration(video_path)
-              if not duration or duration <= 0:
-                  print("   ⚠️ Could not determine video duration, cannot split.")
-                  return []
-
-              # Number of chunks
-              n_chunks = int(size_mb / max_size_mb) + 1
-              chunk_duration = duration / n_chunks
-
-              print(f'   ✂️ Splitting {size_mb:.1f}MB video into {n_chunks} parts...')
-              parent = video_path.parent
-              stem = video_path.stem
-              ext = video_path.suffix
-
-              chunks = []
-              for i in range(n_chunks):
-                  start = i * chunk_duration
-                  end = (i + 1) * chunk_duration if i < n_chunks - 1 else duration
-                  chunk_path = parent / f'{stem}_part{i+1:02d}{ext}'
-                  cmd = [
-                      'ffmpeg', '-y', '-i', str(video_path),
-                      '-ss', str(start), '-to', str(end),
-                      '-c', 'copy', '-avoid_negative_ts', 'make_zero',
-                      str(chunk_path)
-                  ]
-                  subprocess.run(cmd, capture_output=True, check=True)
-                  chunks.append(chunk_path)
-                  print(f'      Chunk {i+1}/{n_chunks}: {chunk_path.stat().st_size/1e6:.1f}MB')
-
-              video_path.unlink()  # remove original
-              return chunks
-
+          # ---------- Video Splitting (optional) ----------
           def get_video_duration(filepath):
               try:
                   result = subprocess.run(
@@ -311,6 +276,38 @@ jobs:
                   return float(result.stdout.strip())
               except: return None
 
+          def split_video(video_path, max_size_mb):
+              if max_size_mb <= 0:
+                  return [video_path]
+              size_mb = video_path.stat().st_size / 1e6
+              if size_mb <= max_size_mb:
+                  return [video_path]
+              duration = get_video_duration(video_path)
+              if not duration or duration <= 0:
+                  print("   ⚠️ Could not determine video duration, cannot split.")
+                  return []
+              n_chunks = int(size_mb / max_size_mb) + 1
+              chunk_duration = duration / n_chunks
+              print(f'   ✂️ Splitting {size_mb:.1f}MB video into {n_chunks} parts...')
+              parent = video_path.parent
+              stem = video_path.stem
+              ext = video_path.suffix
+              chunks = []
+              for i in range(n_chunks):
+                  start = i * chunk_duration
+                  end = (i + 1) * chunk_duration if i < n_chunks - 1 else duration
+                  chunk_path = parent / f'{stem}_part{i+1:02d}{ext}'
+                  subprocess.run([
+                      'ffmpeg', '-y', '-i', str(video_path),
+                      '-ss', str(start), '-to', str(end),
+                      '-c', 'copy', '-avoid_negative_ts', 'make_zero',
+                      str(chunk_path)
+                  ], capture_output=True, check=True)
+                  chunks.append(chunk_path)
+                  print(f'      Chunk {i+1}/{n_chunks}: {chunk_path.stat().st_size/1e6:.1f}MB')
+              video_path.unlink()
+              return chunks
+
           # ---------- Bale Upload Functions ----------
           def bale_send_video(chat_id, video_path, caption=''):
               url = f'{BALE_API}/sendVideo'
@@ -318,7 +315,6 @@ jobs:
                   resp = rq.post(url,
                                  data={'chat_id': chat_id, 'caption': caption},
                                  files={'video': vid})
-              # Log response for debugging
               try:
                   body = resp.json()
                   print(f'      📬 Bale response: {json.dumps(body, indent=2)[:200]}')
@@ -355,7 +351,6 @@ jobs:
                   print(f'\n📥 [{i}/{len(v)}] {x["t"]}')
                   print(f'   Channel: {x["c"]} | Duration: {x["dr"]//60}m | Views: {x["v"]}')
 
-                  # Download video
                   result = dl_video(x['u'])
                   if not result:
                       print('   ❌ Conversion failed, skipping...')
@@ -368,8 +363,11 @@ jobs:
                       continue
                   print(f'   ✅ Downloaded ({size/1e6:.1f}MB)')
 
-                  # ---------- Split if too large ----------
-                  chunks = split_video(video_path)
+                  # Split if requested
+                  if SPLIT_MB > 0:
+                      chunks = split_video(video_path, SPLIT_MB)
+                  else:
+                      chunks = [video_path]
 
                   # Prepare info file
                   dur_str = f'{x["dr"]//60} minutes' if x['dr'] else 'Unknown'
@@ -386,7 +384,6 @@ jobs:
 
                   label = f'E{i}'
 
-                  # Upload each chunk
                   for idx, chunk_path in enumerate(chunks, 1):
                       part_label = f'{label} (part {idx}/{len(chunks)})' if len(chunks) > 1 else label
                       caption = f'{part_label} - {x["t"]}'
@@ -396,10 +393,8 @@ jobs:
                           print(f'   ✅ Uploaded {part_label}')
                       else:
                           print(f'   ❌ Upload failed for {part_label}: {resp}')
-                      # Clean up chunk immediately
                       chunk_path.unlink()
 
-                  # Upload info file
                   print(f'   📄 Uploading info for {label}...')
                   info_caption = f'📝 اطلاعات ویدیوی بالا ({label})'
                   bale_send_document(BALE_CHAT_ID, str(info_path), caption=info_caption)
