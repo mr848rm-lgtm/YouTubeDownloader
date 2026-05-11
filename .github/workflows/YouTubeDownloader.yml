@@ -14,7 +14,7 @@ on:
           - search
         default: 'single'
       url:
-        description: '🎬 URL or Search Query or channel name (@ChannelName or ChannelName)'
+        description: '🎬 URL or Search Query or channel name'
         required: true
         type: string
       type:
@@ -26,38 +26,35 @@ on:
           - audio
         default: 'video'
       quality:
-        description: 'Quality (video: 144/360/480/720/1080 | audio: 128/192/320)'
+        description: 'Quality'
         required: false
         type: string
         default: '720'
       max_videos:
-        description: '🔢 Max results (0 for all)'
+        description: '🔢 Max results (0 = all)'
         required: false
         type: number
-        default: 20    # پیشنهاد: بین ۲۰ تا ۳۰
+        default: 0
       split_threshold_mb:
         description: '📦 Split > MB (0=no)'
         required: false
         type: number
-        default: 50
+        default: 0
 
 env:
   PYTHONUNBUFFERED: '1'
   DEBIAN_FRONTEND: 'noninteractive'
 
 jobs:
-  download-and-process:
-    name: 🚀 YouTube Downloader
+  download-and-release:
+    name: 🚀 Download & Release
     runs-on: ubuntu-latest
     timeout-minutes: 120
     permissions:
-      contents: write
+      contents: write   # اجازهٔ ساخت Release
 
     steps:
       - uses: actions/checkout@v4
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-          fetch-depth: 1
 
       - uses: actions/cache@v4
         with:
@@ -80,7 +77,6 @@ jobs:
           echo "MODE=$M" >> $GITHUB_OUTPUT
 
       - name: 🎯 Download & Process
-        id: main
         env:
           MODE: ${{ steps.prep.outputs.MODE }}
           URL: ${{ steps.prep.outputs.URL }}
@@ -89,6 +85,7 @@ jobs:
           MAX: ${{ github.event.inputs.max_videos }}
           SPLIT: ${{ github.event.inputs.split_threshold_mb }}
         run: |
+          # ---------- Python script unchanged (full version) ----------
           python3 << 'PYEOF'
           import os, json, time, re, subprocess, sys, hashlib
           import requests as rq
@@ -99,8 +96,8 @@ jobs:
           U = os.environ['URL']
           T = os.environ['TYPE']
           Q = os.environ.get('QUALITY', '720')
-          MX = int(os.environ.get('MAX', '10'))   # مقدار پیش‌فرض ۱۰
-          SP = int(os.environ.get('SPLIT', '50'))
+          MX = int(os.environ.get('MAX', '0'))
+          SP = int(os.environ.get('SPLIT', '0'))
 
           API = 'https://hub.ytconvert.org/api/download'
           H = {
@@ -150,14 +147,9 @@ jobs:
               return ('Unknown', None, 0, None)
 
           def get_channel_from_url(url):
-              m = re.search(r'@([\w-]+)', url)
-              if m: return m.group(1)
-              m = re.search(r'channel/([\w-]+)', url)
-              if m: return m.group(1)
-              m = re.search(r'c/([\w-]+)', url)
-              if m: return m.group(1)
-              m = re.search(r'user/([\w-]+)', url)
-              if m: return m.group(1)
+              for pattern in [r'@([\w-]+)', r'channel/([\w-]+)', r'c/([\w-]+)', r'user/([\w-]+)']:
+                  m = re.search(pattern, url)
+                  if m: return m.group(1)
               return None
 
           def get_channel_from_playlist(playlist_url):
@@ -190,13 +182,13 @@ jobs:
               r = subprocess.run(c, capture_output=True, text=True, timeout=30)
               v = []
               for line in r.stdout.strip().split('\n'):
-                  if line and len(v) < n:
+                  if line and (n == 0 or len(v) < n):
                       try:
                           d = json.loads(line)
                           vid = d.get('id', '')
                           if not vid: continue
                           title = d.get('title', 'Untitled')[:60]
-                          print(f'   📊 [{len(v)+1}/{n}] {title}...')
+                          print(f'   📊 [{len(v)+1}/{n if n>0 else "?"}] {title}...')
                           ch, vw, dr, _ = gv(vid)
                           if not ch or ch == 'Unknown':
                               ch = (d.get('channel') or d.get('uploader') or 
@@ -404,18 +396,19 @@ jobs:
                   print('❌ Failed'); sys.exit(1)
           PYEOF
 
-      - name: 📤 Push Files
+      - name: 📦 Zip results
         run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "bot@github.com"
-          git add -A
-          TOTAL=$(git diff --cached --name-only | wc -l)
-          if [ "$TOTAL" -eq 0 ]; then
-            echo "Nothing to push"
-            exit 0
-          fi
-          echo "Committing and pushing $TOTAL files..."
-          git commit -m "📦 $(date +%m%d-%H%M) [skip ci]" --quiet
-          git pull --rebase --quiet
-          git push --quiet
-          echo "✅ Push successful"
+          mkdir -p results
+          [ -d downloads ] && mv downloads results/
+          [ -d playlists ] && mv playlists results/
+          [ -d searches ] && mv searches results/
+          zip -r qresults.zip results/
+
+      - name: 🚀 Create Release and Upload
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: download-${{ github.run_id }}
+          name: "🎥 Download ${{ steps.prep.outputs.MODE }} - ${{ github.run_id }}"
+          files: qresults.zip
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
