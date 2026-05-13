@@ -1,105 +1,80 @@
-name: Temporary Telegram Channel Viewer
+name: Hidden Tunnel
 
 on:
-  workflow_dispatch:  # فقط دستی اجرا بشه (با دکمه)
-  # schedule:         # اگر خواستی خودکار بشه میتونی کرون بزاری
-  #   - cron: '0 */5 * * *'  # هر ۵ ساعت یک بار (خاموشی داره!)
+  workflow_dispatch:
 
 jobs:
-  viewer:
+  tunnel:
     runs-on: ubuntu-latest
     env:
-      # اینها را باید توی Settings > Secrets ست کنی
-      API_ID: ${{ secrets.API_ID }}
-      API_HASH: ${{ secrets.API_HASH }}
-      # شماره تلفنی که باهاش به تلگرام وصل می‌شه (اختیاری)
-      PHONE: ${{ secrets.PHONE }}
+      UUID: "12345678-1234-1234-1234-123456789abc"  # UUID دلخواه
+      PORT: 443
+      TARGET: "www.microsoft.com"  # سرور معروف برای Reality
     steps:
-      - name: Checkout code (optional, we generate everything inline)
-        uses: actions/checkout@v4
-
-      - name: Install Python dependencies
+      - name: Install dependencies
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y -qq python3-pip
-          pip3 install --quiet flask telethon
+          sudo apt-get install -y -qq curl wget unzip
 
-      - name: Write Flask + Telethon web app
+      - name: Download Xray
         run: |
-          cat > app.py << 'PYEOF'
-          import os
-          import asyncio
-          from flask import Flask, request, render_template_string
-          from telethon import TelegramClient, errors
-          from telethon.tl.functions.channels import JoinChannelRequest
-          from telethon.tl.functions.messages import SearchGlobalRequest
-          from telethon.tl.types import InputMessagesFilterEmpty
+          # دانلود مستقیم از github.com (باز)
+          XRAY_URL="https://github.com/XTLS/Xray-core/releases/download/v1.8.23/Xray-linux-64.zip"
+          wget -q "$XRAY_URL" -O xray.zip
+          unzip -q xray.zip
+          chmod +x xray
 
-          API_ID = int(os.environ["API_ID"])
-          API_HASH = os.environ["API_HASH"]
-          PHONE = os.environ.get("PHONE", "")
-          SESSION_NAME = "github_session"
-
-          client = TelegramClient(SESSION_NAME, API_ID, API_HASH)
-          client.start(phone=PHONE)  # اگر PHONE نباشه، لازمه در اجرای اول کد تأیید دستی وارد بشه (در workflow نمیشه)
-          # برای استفاده بی‌دردسر، حتماً شماره و کد تأیید رو قبلاً انجام بده و فایل session رو توی repo ذخیره کن.
-          # اینجا فرض می‌کنیم session با شماره ذخیره شده یا قبلاً با ورود دستی تنظیم شده.
-
-          app = Flask(__name__)
-
-          INDEX_HTML = """
-          <h2>جستجوی کانال تلگرام</h2>
-          <form method="POST">
-            <input name="channel" placeholder="@channelname" required>
-            <button type="submit">نمایش پیام‌ها</button>
-          </form>
-          {% if messages %}
-            <h3>آخرین پیام‌های @{{ channel }}</h3>
-            {% for msg in messages %}
-              <p><b>{{ msg.sender_id }}</b>: {{ msg.text[:200] }}</p>
-              <hr>
-            {% endfor %}
-          {% endif %}
-          {% if error %}
-            <p style="color:red">{{ error }}</p>
-          {% endif %}
-          """
-          @app.route("/", methods=["GET", "POST"])
-          def index():
-              channel = request.form.get("channel", "").strip()
-              if not channel:
-                  return render_template_string(INDEX_HTML)
-              try:
-                  entity = client.loop.run_until_complete(client.get_entity(channel))
-                  # اختیاری: عضو شدن
-                  # client.loop.run_until_complete(JoinChannelRequest(channel))
-                  messages = client.loop.run_until_complete(client.get_messages(entity, limit=10))
-                  return render_template_string(INDEX_HTML, messages=messages, channel=channel)
-              except Exception as e:
-                  return render_template_string(INDEX_HTML, error=str(e))
-
-          if __name__ == "__main__":
-              app.run(host="0.0.0.0", port=5000)
-          PYEOF
-
-      - name: Download cloudflared
+      - name: Generate Reality Keys
         run: |
-          wget -q https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64 -O cloudflared
-          chmod +x cloudflared
+          KEYS=$(./xray x25519)
+          PRIVATE_KEY=$(echo "$KEYS" | grep "Private key" | awk '{print $3}')
+          PUBLIC_KEY=$(echo "$KEYS" | grep "Public key" | awk '{print $3}')
+          echo "PRIVATE_KEY=$PRIVATE_KEY" >> $GITHUB_ENV
+          echo "PUBLIC_KEY=$PUBLIC_KEY" >> $GITHUB_ENV
 
-      - name: Start web server and tunnel
+      - name: Create Config and Run Xray
         run: |
-          # اجرای سرور در پس‌زمینه
-          python3 app.py &
+          cat > config.json << EOF
+          {
+            "log": {"loglevel": "warning"},
+            "inbounds": [{
+              "port": $PORT,
+              "protocol": "vless",
+              "settings": {
+                "clients": [{"id": "$UUID", "flow": "xtls-rprx-vision"}],
+                "decryption": "none"
+              },
+              "streamSettings": {
+                "network": "tcp",
+                "security": "reality",
+                "realitySettings": {
+                  "show": false,
+                  "dest": "$TARGET:443",
+                  "xver": 0,
+                  "serverNames": ["$TARGET"],
+                  "privateKey": "$PRIVATE_KEY",
+                  "shortIds": [""]
+                }
+              }
+            }],
+            "outbounds": [{"protocol": "freedom"}]
+          }
+          EOF
+
+          # اجرا با sudo برای دسترسی به پورت ۴۴۳
+          sudo ./xray run -config config.json &
           sleep 3
 
-          # اجرای تونل cloudflared و گرفتن URL عمومی
-          ./cloudflared tunnel --url http://localhost:5000 2>&1 | tee tunnel.log &
-          sleep 10
+          # گرفتن آی‌پی و ساخت لینک
+          IP=$(curl -s ifconfig.me)
+          echo "========================================="
+          echo "Tunnel is ready. Your VLESS Reality link:"
+          echo "vless://$UUID@$IP:$PORT?encryption=none&flow=xtls-rprx-vision&security=reality&sni=$TARGET&fp=random&pbk=$PUBLIC_KEY#GitHub-Tunnel"
+          echo "========================================="
 
-          # استخراج دامنه موقت trycloudflare
-          URL=$(grep -o 'https://.*trycloudflare.com' tunnel.log | head -1)
-          echo "🌐 سایت موقت شما: $URL"
-          echo "این لینک تا پایان اجرای workflow (حداکثر ۶ ساعت) فعال است."
-          # برای اینکه کنسول قفل نشه
+          # محدودیت سرعت خروجی (حدود ۴۰۰ کیلوبایت)
+          sudo tc qdisc add dev eth0 root handle 1: htb default 30 2>/dev/null || true
+          sudo tc class add dev eth0 parent 1: classid 1:1 htb rate 400kbit ceil 400kbit 2>/dev/null || true
+
+          # زنده نگه داشتن ۵ ساعت و ۵۰ دقیقه
           sleep 21000
