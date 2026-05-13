@@ -1,11 +1,78 @@
-name: Test
+name: V2Ray Reality No Domain
 
 on:
   workflow_dispatch:
 
 jobs:
-  test:
+  reality:
     runs-on: ubuntu-latest
+    env:
+      UUID: "12345678-1234-1234-1234-123456789abc"   # هر UUID دلخواه
+      PORT: 443
+      TARGET: "www.microsoft.com"   # دامنه‌ای که معروفه و فیلتر نیست
     steps:
-      - name: Say Hello
-        run: echo "Hello, GitHub Actions works!"
+      - name: Install Xray
+        run: |
+          bash -c "$(curl -L https://github.com/XTLS/Xray-install/raw/main/install-release.sh)" @ install
+          
+      - name: Generate Reality Keys
+        run: |
+          KEYS=$(/usr/local/bin/xray x25519)
+          PRIVATE_KEY=$(echo "$KEYS" | grep "Private key" | awk '{print $3}')
+          PUBLIC_KEY=$(echo "$KEYS" | grep "Public key" | awk '{print $3}')
+          echo "PRIVATE_KEY=$PRIVATE_KEY" >> $GITHUB_ENV
+          echo "PUBLIC_KEY=$PUBLIC_KEY" >> $GITHUB_ENV
+
+      - name: Create Config and Start Xray
+        run: |
+          cat > /usr/local/etc/xray/config.json << EOF
+          {
+            "log": {"loglevel": "warning"},
+            "inbounds": [{
+              "port": $PORT,
+              "protocol": "vless",
+              "settings": {
+                "clients": [{"id": "$UUID", "flow": "xtls-rprx-vision"}],
+                "decryption": "none"
+              },
+              "streamSettings": {
+                "network": "tcp",
+                "security": "reality",
+                "realitySettings": {
+                  "show": false,
+                  "dest": "$TARGET:443",
+                  "xver": 0,
+                  "serverNames": ["$TARGET"],
+                  "privateKey": "$PRIVATE_KEY",
+                  "shortIds": [""]
+                }
+              }
+            }],
+            "outbounds": [{"protocol": "freedom"}]
+          }
+          EOF
+
+          systemctl restart xray
+
+          # گرفتن آی‌پی و ساخت لینک
+          IP=$(curl -s ifconfig.me)
+          echo "========================================="
+          echo "Your VLESS Reality config:"
+          echo "IP: $IP"
+          echo "Port: $PORT"
+          echo "UUID: $UUID"
+          echo "Flow: xtls-rprx-vision"
+          echo "Public Key: $PUBLIC_KEY"
+          echo "SNI: $TARGET"
+          echo ""
+          echo "vmess (Nekobox / V2RayNG / v2rayN):"
+          echo "vless://$UUID@$IP:$PORT?encryption=none&flow=xtls-rprx-vision&security=reality&sni=$TARGET&fp=random&pbk=$PUBLIC_KEY#GitHubActions"
+          echo "========================================="
+
+          # اعمال محدودیت سرعت (۴۰۰ کیلوبایت)
+          sudo apt-get update && sudo apt-get install -y iproute2
+          sudo tc qdisc add dev eth0 root handle 1: htb default 30
+          sudo tc class add dev eth0 parent 1: classid 1:1 htb rate 400kbit ceil 400kbit
+
+          # زنده نگه داشتن برای ۶ ساعت (کمتر از ۶ ساعت)
+          sleep 21000
