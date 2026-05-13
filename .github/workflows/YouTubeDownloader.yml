@@ -1,36 +1,36 @@
-name: My Telegram Proxy (Docker)
+name: Telegram Proxy (disguised as GitHub)
 
 on:
-  workflow_dispatch:   # اجرا با دکمه دستی
+  workflow_dispatch:
 
 jobs:
   proxy:
     runs-on: ubuntu-latest
     steps:
-      - name: Start proxy and keep alive
+      - name: Start proxy with fake TLS (disguise as github.com)
         run: |
-          # کانتینر رسمی پروکسی تلگرام رو روی پورت 443 اجرا کن
-          docker run -d --name mtproto-proxy -p 443:443 telegrammessenger/proxy:latest
+          # اجرای پروکسی با DOMAIN=github.com تا ترافیک مثل HTTPS گیت‌هاب بشه
+          # خود کانتینر یک secret تصادفی تولید می‌کنه
+          docker run -d --name mtproto-proxy \
+            -p 443:443 \
+            -e DOMAIN=github.com \
+            telegrammessenger/proxy:latest
 
-          # صبر کن کانتینر بالا بیاد و secret رو بسازه (حدود ۱۰ ثانیه کافیه)
+          # صبر کن بالا بیاد
           sleep 15
 
-          # secret رو از لاگ کانتینر استخراج کن
-          SECRET=$(docker logs mtproto-proxy 2>&1 | grep -oP 'secret=\K[0-9a-f]{32}')
-          if [ -z "$SECRET" ]; then
-            echo "Secret not found in logs, retrying..."
+          # لینک کامل پروکسی (با پیشوند dd) از لاگ استخراج کن
+          PROXY_LINK=$(docker logs mtproto-proxy 2>&1 | grep -oP 'tg://proxy\?[^ ]*')
+          if [ -z "$PROXY_LINK" ]; then
+            echo "Retrying..."
             sleep 10
-            SECRET=$(docker logs mtproto-proxy 2>&1 | grep -oP 'secret=\K[0-9a-f]{32}')
+            PROXY_LINK=$(docker logs mtproto-proxy 2>&1 | grep -oP 'tg://proxy\?[^ ]*')
           fi
 
-          # IP عمومی سرور گیت‌هاب رو بگیر
-          SERVER_IP=$(curl -s ifconfig.me)
-
-          # چاپ لینک نهایی
           echo "========================================="
-          echo "Proxy link (copy this and put in Telegram):"
-          echo "tg://proxy?server=${SERVER_IP}&port=443&secret=${SECRET}"
+          echo "Your disguised proxy link:"
+          echo "$PROXY_LINK"
           echo "========================================="
 
-          # زنده نگه داشتن workflow (تا ۵ ساعت و ۵۰ دقیقه)
+          # زنده نگه داشتن ۶ ساعت
           sleep 21000
