@@ -1,74 +1,370 @@
-name: Playlist to Text
+name: YouTube Playlist Downloader with Zip
 
 on:
   workflow_dispatch:
     inputs:
+      mode:
+        description: 'Mode'
+        required: true
+        type: choice
+        options: [single, playlist, channel, search]
+        default: 'playlist'
       url:
-        description: 'Playlist URL'
+        description: 'URL / search query'
         required: true
         type: string
-      filename:
-        description: 'Output file name (without .txt)'
+      type:
+        description: 'Output type'
+        required: true
+        type: choice
+        options: [video, audio]
+        default: 'video'
+      quality:
+        description: 'Quality (video: 144/360/480/720/1080, audio: 128/192/320)'
         required: false
         type: string
-        default: 'playlist'
+        default: '720'
+      start:
+        description: 'Start number (leave empty for 1)'
+        required: false
+        type: number
+        default: 1
+      end:
+        description: 'End number (0 = all)'
+        required: false
+        type: number
+        default: 0
+      max_videos:
+        description: 'Max videos (used only if end = 0)'
+        required: false
+        type: number
+        default: 0
+      split_video_mb:
+        description: 'Split single video if larger than this MB (0 to skip)'
+        required: false
+        type: number
+        default: 0
+      zip_size_gb:
+        description: 'Max size of each zip file in GB'
+        required: false
+        type: number
+        default: 1
+
+env:
+  PYTHONUNBUFFERED: '1'
+  DEBIAN_FRONTEND: 'noninteractive'
 
 jobs:
-  extract:
+  download:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 360
     permissions:
       contents: write
     steps:
       - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          fetch-depth: 1
 
-      - name: Install yt-dlp
-        run: pip install -q yt-dlp
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: pip-${{ runner.os }}
 
-      - name: Extract playlist
+      - name: Install tools
+        run: |
+          python3 -c "import requests" 2>/dev/null || pip3 install -q requests
+          command -v yt-dlp &>/dev/null || pip3 install -q yt-dlp
+          command -v zip &>/dev/null || (sudo apt-get update -qq && sudo apt-get install -y -qq zip)
+
+      - name: Prepare
+        id: prep
+        run: |
+          MODE="${{ github.event.inputs.mode }}"
+          URL="${{ github.event.inputs.url }}"
+          if [ "$MODE" = "channel" ] && [[ "$URL" != http* ]]; then
+            if [[ "$URL" == @* ]]; then
+              URL="https://www.youtube.com/$URL"
+            else
+              URL="https://www.youtube.com/@$URL"
+            fi
+          fi
+          echo "URL=$URL" >> $GITHUB_OUTPUT
+          echo "MODE=$MODE" >> $GITHUB_OUTPUT
+
+      - name: Run
         env:
-          URL: ${{ github.event.inputs.url }}
-          NAME: ${{ github.event.inputs.filename }}
+          MODE: ${{ steps.prep.outputs.MODE }}
+          URL: ${{ steps.prep.outputs.URL }}
+          TYPE: ${{ github.event.inputs.type }}
+          QUALITY: ${{ github.event.inputs.quality }}
+          START: ${{ github.event.inputs.start }}
+          END: ${{ github.event.inputs.end }}
+          MAX: ${{ github.event.inputs.max_videos }}
+          SPLIT_MB: ${{ github.event.inputs.split_video_mb }}
+          ZIP_GB: ${{ github.event.inputs.zip_size_gb }}
         run: |
           python3 << 'PYEOF'
-          import subprocess, sys, json, os
+          import os, json, time, re, subprocess, sys, hashlib, shutil
+          from pathlib import Path
+          from datetime import datetime
 
-          url = os.environ['URL']
-          name = os.environ.get('NAME', 'playlist')
+          MODE = os.environ['MODE']
+          URL = os.environ['URL']
+          TYPE = os.environ['TYPE']
+          QUALITY = os.environ.get('QUALITY', '720')
+          START = int(os.environ.get('START', '1'))
+          END = int(os.environ.get('END', '0'))
+          MAX = int(os.environ.get('MAX', '0'))
+          SPLIT_MB = int(os.environ.get('SPLIT_MB', '0'))
+          ZIP_GB = float(os.environ.get('ZIP_GB', '1'))
 
-          cmd = ['yt-dlp', '--flat-playlist', '--dump-json', '--no-warnings', '--no-check-certificate', url]
-          result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
-          if result.returncode != 0:
-              print('yt-dlp failed')
-              sys.exit(1)
+          API = 'https://hub.ytconvert.org/api/download'
+          HEADERS = {
+              'User-Agent': 'Mozilla/5.0',
+              'Accept': 'application/json',
+              'Content-Type': 'application/json',
+          }
 
-          lines = []
-          for i, line in enumerate(result.stdout.strip().split('\n'), start=1):
+          def safe_name(text, maxlen=50):
+              s = re.sub(r'[^\w]', '_', str(text))[:maxlen]
+              s = re.sub(r'_+', '_', s).strip('_')
+              if not s:
+                  s = hashlib.md5(str(text).encode()).hexdigest()[:8]
+              return s
+
+          def get_video_info(video_id):
               try:
-                  data = json.loads(line)
-                  title = data.get('title', 'Untitled')
-                  vid = data.get('id', '')
-                  if not vid:
-                      continue
-                  watch_url = f'https://youtube.com/watch?v={vid}'
-                  lines.append(f'{title}\nE{i} = {watch_url}')
+                  r = subprocess.run(
+                      ['yt-dlp', '--dump-json', '--no-warnings', '--no-check-certificate',
+                       f'https://youtube.com/watch?v={video_id}'],
+                      capture_output=True, text=True, timeout=20
+                  )
+                  if r.returncode == 0 and r.stdout.strip():
+                      d = json.loads(r.stdout)
+                      return d.get('title', 'Untitled'), d.get('channel') or d.get('uploader') or 'Unknown', d.get('duration', 0)
               except:
-                  continue
+                  pass
+              return 'Untitled', 'Unknown', 0
 
-          out = f'{name}.txt'
-          with open(out, 'w', encoding='utf-8') as f:
-              f.write('\n'.join(lines))
-          print(f'Saved {len(lines)} entries to {out}')
+          def get_channel_handle_from_url(url):
+              m = re.search(r'@([\w.-]+)', url)
+              if m: return m.group(1)
+              return None
+
+          def collect_videos(playlist_url, limit):
+              cmd = ['yt-dlp', '--flat-playlist', '--dump-json', '--no-warnings', '--no-check-certificate']
+              if limit and limit > 0:
+                  cmd += ['--playlist-end', str(limit)]
+              cmd.append(playlist_url)
+              result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+              videos = []
+              for line in result.stdout.strip().split('\n'):
+                  try:
+                      d = json.loads(line)
+                      vid = d.get('id')
+                      if not vid: continue
+                      title = d.get('title', 'Untitled')
+                      videos.append({'id': vid, 'title': title, 'url': f'https://youtube.com/watch?v={vid}'})
+                  except:
+                      continue
+              return videos
+
+          def download_video(video_url, video_id, output_dir):
+              ext = 'mp3' if TYPE == 'audio' else 'mp4'
+              payload = {
+                  'url': video_url,
+                  'os': 'linux',
+                  'output': {
+                      'type': 'audio' if TYPE == 'audio' else 'video',
+                      'format': ext
+                  }
+              }
+              if TYPE == 'audio':
+                  payload['audio'] = {'bitrate': f'{QUALITY}k'}
+              else:
+                  payload['output']['quality'] = f'{QUALITY}p'
+
+              for attempt in range(3):
+                  try:
+                      resp = requests.post(API, json=payload, headers=HEADERS, timeout=15)
+                      if resp.status_code != 200:
+                          time.sleep(3)
+                          continue
+                      data = resp.json()
+                      status_url = data.get('statusUrl')
+                      if not status_url:
+                          continue
+                      for _ in range(90):
+                          time.sleep(2)
+                          try:
+                              sresp = requests.get(status_url, headers=HEADERS, timeout=10)
+                              if sresp.status_code != 200:
+                                  break
+                              sdata = sresp.json()
+                              if sdata.get('status') == 'completed':
+                                  dl_url = sdata.get('downloadUrl')
+                                  if dl_url:
+                                      filepath = output_dir / f'{video_id}.{ext}'
+                                      with requests.get(dl_url, stream=True, timeout=600) as r:
+                                          r.raise_for_status()
+                                          with open(filepath, 'wb') as f:
+                                              for chunk in r.iter_content(8192):
+                                                  f.write(chunk)
+                                      return filepath
+                              elif sdata.get('status') in ('failed', 'error'):
+                                  break
+                          except:
+                              continue
+                  except:
+                      time.sleep(2)
+              return None
+
+          def split_large_file(filepath, max_mb):
+              size_mb = filepath.stat().st_size / (1024 * 1024)
+              if max_mb > 0 and size_mb > max_mb:
+                  parent = filepath.parent
+                  name = filepath.name
+                  subprocess.run(['zip', '-r', '-q', '-s', f'{max_mb}m', f'{name}.zip', name],
+                                 cwd=parent, check=True)
+                  filepath.unlink()
+                  return True
+              return False
+
+          def create_zip_chunks(files, output_base, max_bytes):
+              chunks = []
+              current_chunk = []
+              current_size = 0
+              for f in sorted(files, key=lambda x: x.stat().st_size):
+                  fsize = f.stat().st_size
+                  if current_size + fsize > max_bytes and current_chunk:
+                      chunks.append(current_chunk)
+                      current_chunk = []
+                      current_size = 0
+                  current_chunk.append(f)
+                  current_size += fsize
+              if current_chunk:
+                  chunks.append(current_chunk)
+
+              zip_paths = []
+              for i, chunk in enumerate(chunks, start=1):
+                  zip_name = f'{output_base}_part{i}.zip'
+                  zip_path = Path(zip_name)
+                  cmd = ['zip', '-0', '-q', '-r', str(zip_path)] + [f.name for f in chunk]
+                  subprocess.run(cmd, cwd=chunk[0].parent, check=True)
+                  zip_paths.append(zip_path)
+              return zip_paths
+
+          import requests
+
+          print(f'Mode: {MODE}')
+          print(f'URL: {URL}')
+
+          if MODE in ('playlist', 'channel'):
+              limit = 0
+              if END > 0:
+                  limit = END
+              elif MAX > 0:
+                  limit = MAX
+
+              videos = collect_videos(URL, limit)
+              if not videos:
+                  print('No videos found.')
+                  sys.exit(1)
+
+              if START > 1:
+                  videos = videos[START-1:]
+              if END > 0:
+                  videos = videos[:END - START + 1]
+              elif MAX > 0:
+                  videos = videos[:MAX]
+
+              if not videos:
+                  print('No videos in range.')
+                  sys.exit(1)
+
+              channel_handle = get_channel_handle_from_url(URL) or 'playlist'
+              folder_name = safe_name(channel_handle, 40)
+              output_dir = Path(f'downloads/{folder_name}')
+              output_dir.mkdir(parents=True, exist_ok=True)
+
+              txt_lines = []
+              downloaded_files = []
+
+              for idx, v in enumerate(videos, start=START):
+                  print(f'[{idx}/{START+len(videos)-1}] {v["title"]}')
+                  filepath = download_video(v['url'], v['id'], output_dir)
+                  if filepath:
+                      split_large_file(filepath, SPLIT_MB)
+                      final_file = filepath if filepath.exists() else sorted(output_dir.glob(f'{v["id"]}.*'))[0]
+                      downloaded_files.append(final_file)
+                      txt_lines.append(f'{v["title"]}\nE{idx} = {v["url"]}')
+                      print(f'  Downloaded: {final_file.name}')
+                  else:
+                      txt_lines.append(f'{v["title"]}\nE{idx} = FAILED')
+                      print('  Failed.')
+                  time.sleep(1)
+
+              txt_path = output_dir / f'{folder_name}_list.txt'
+              txt_path.write_text('\n'.join(txt_lines), encoding='utf-8')
+
+              max_zip_bytes = int(ZIP_GB * 1024 * 1024 * 1024)
+              if downloaded_files:
+                  zip_base = output_dir / folder_name
+                  create_zip_chunks(downloaded_files, str(zip_base), max_zip_bytes)
+                  for f in downloaded_files:
+                      f.unlink(missing_ok=True)
+
+              print(f'Done. Output in {output_dir}')
+
+          elif MODE == 'single':
+              video_id_match = re.search(r'(?:v=|/)([\w-]{11})', URL)
+              if not video_id_match:
+                  print('Invalid URL'); sys.exit(1)
+              vid = video_id_match.group(1)
+              title, channel, _ = get_video_info(vid)
+              channel = safe_name(channel, 40)
+              out = Path(f'downloads/{channel}')
+              out.mkdir(parents=True, exist_ok=True)
+              filepath = download_video(URL, vid, out)
+              if filepath:
+                  split_large_file(filepath, SPLIT_MB)
+                  (out / f'{channel}_list.txt').write_text(f'{title}\nE1 = {URL}', encoding='utf-8')
+                  print(f'Downloaded: {filepath.name}')
+              else:
+                  print('Failed.')
+
+          elif MODE == 'search':
+              query = URL
+              limit = MAX if MAX > 0 else 10
+              videos = collect_videos(f'ytsearch{limit}:{query}', limit)
+              if not videos:
+                  print('No results.'); sys.exit(1)
+              out = Path(f'downloads/search_{safe_name(query)}')
+              out.mkdir(parents=True, exist_ok=True)
+              lines = []
+              for i, v in enumerate(videos, 1):
+                  lines.append(f'{v["title"]}\nE{i} = {v["url"]}')
+              (out / f'search_{safe_name(query)}.txt').write_text('\n'.join(lines), encoding='utf-8')
+              print(f'Search results saved to {out}')
           PYEOF
 
-      - name: Commit and push
+      - name: Push to repository
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "bot@github.com"
-          git add *.txt
+          git add -A
           if git diff --cached --quiet; then
-            echo "No changes"
+            echo "Nothing to commit"
             exit 0
           fi
-          git commit -m "Add playlist ${{ github.event.inputs.filename }}.txt"
-          git push
+          git commit -m "Add downloads $(date +%m%d-%H%M)"
+          for i in $(seq 1 5); do
+            if git pull --rebase --quiet 2>/dev/null && git push --quiet 2>/dev/null; then
+              exit 0
+            fi
+            git rebase --abort 2>/dev/null
+            sleep $((i*5))
+          done
+          echo "Push failed"
+          exit 1
