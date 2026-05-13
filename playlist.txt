@@ -1,0 +1,172 @@
+آموزش علم داده(Data Science) - جلسه اول | Introduction
+E1 = https://youtube.com/watch?v=C1QYzoJS-0w
+آموزش علم داده - جلسه دوم - بخش اول | Probability
+E2 = https://youtube.com/watch?v=CXiBLvczJvs
+آموزش علم داده - جلسه دوم - بخش دوم | Combinatorics
+E3 = https://youtube.com/watch?v=Ws5dLYV4iKw
+آموزش علم داده - جلسه دوم - بخش سوم
+E4 = https://youtube.com/watch?v=_AWUncWfbiA
+آموزش علم داده - توضیحات تکمیلی درباره جلسۀ دوم
+E5 = https://youtube.com/watch?v=VMUh9uIfImw
+آموزش علم داده - جلسه سوم - بخش اول - قانون بیز
+E6 = https://youtube.com/watch?v=7ie6tD7-llI
+آموزش علم داده - جلسه سوم - بخش دوم
+E7 = https://youtube.com/watch?v=FW2pLpf0HH8
+آموزش علم داده - توزیع‌های احتمال - جلسه چهارم
+E8 = https://youtube.com/watch?v=vrGITsVRZzs
+آموزش علم داده - توزیع‌های گسسته
+E9 = https://youtube.com/watch?v=EcJ6BbW_qA0
+آموزش علم داده - توزیع‌های پیوسته
+E10 = https://youtube.com/watch?v=thwuLGMHFhA
+آموزش علم داده - شرطی‌ها در پایتون
+E11 = https://youtube.com/watch?v=koZtebHfgR4
+آموزش علم داده - توابع در پایتون
+E12 = https://youtube.com/watch?v=QwbsYWgNMv8
+آموزش علم داده - سری‌ها در پایتون
+E13 = https://youtube.com/watch?v=HPr4BcGbFhM
+آموزش علم داده - یک مثال عملی، کاربرد احتمالات
+E14 = https://youtube.com/watch?v=Ny95Nzs4Dic
+آموزش علم داده - هفته هفتم - بخش اول - چرا احتمالات؟
+E15 = https://youtube.com/watch?v=QHAGZwy57J8
+آموزش علم داده - هفته هفتم - بخش دوم - تکرارها در پایتون
+E16 = https://youtube.com/watch?v=SukpB8hxgDs
+آموزش علم داده   هفته هفتم   بخش سوم   مباحث پیشرفته در پایتون
+E17 = https://youtube.com/watch?v=VII58Xr5CXA
+آموزش علم داده - آمار توصیفی و تحلیل داده‌ها
+E18 = https://youtube.com/watch?v=8UfIy_FZOLo
+آموزش علم داده - یک مثال کاربردی از آمار توصیفی در تحلیل داده‌ها
+E19 = https://youtube.com/watch?v=Yy1Gtp_Wqgg
+آموزش علم داده - آمار استنتاجی در علم داده
+E20 = https://youtube.com/watch?v=93WJMjCD_aY
+آموزش علم داده - بازه اطمینان - بخش اول
+E21 = https://youtube.com/watch?v=EcsDG-pVq64
+آموزش علم داده - بازه اطمینان - بخش دوم
+E22 = https://youtube.com/watch?v=lGnEyxqwCo8
+آموزش علم داده - بازه اطمینان - بخش سوم
+E23 = https://youtube.com/watch?v=lRqIEJXK9wE
+آموزش علم داده - بازه‌ی اطمینان و یک مثال از دنیای واقعی و مارکتینگ
+E24 = https://youtube.com/watch?v=fC5voneQylY
+آموزش علم داده - آزمون فرض
+E25 = https://youtube.com/watch?v=5TNEizz1GJo
+آموزش علم داده - خطاها و p مقدار در آزمون فرض
+E26 = https://youtube.com/watch?v=D_QIezBwE3c
+آموزش علم داده - آزمون فرض برای چند جامعه
+E27 = https://youtube.com/watch?v=NgozL-dM1dg
+آموزش علم داده - تشخیص شکاف حقوقی با استفاده از آزمون فرض
+E28 = https://youtube.com/watch?v=reUJPWEna9U
+🔥 آموزش علم داده | رگرسیون خطی ساده و پیاده‌سازی آن در پایتون
+E29 = https://youtube.com/watch?v=4B04bjuqtPc
+آموزش علم داده - پیاده سازی رگرسیون خطی در پایتون
+E30 = https://youtube.com/watch?v=4bu4R8-BRRg
+آموزش علم داده - رگرسیون چندگانه
+E31 = https://youtube.com/watch?v=LAfiHEnEOd8
+آموزش علم داده - ضریب تعیین و کاربردش
+E32 = https://youtube.com/watch?v=zVT6pkl5tAM
+آموزش علم داده - پیاده‌سازی رگرسیون خطی چندگانه در پایتون
+E33 = https://youtube.com/watch?v=8iHoX9WeXoQ
+آموزش علم داده - ضریب تعیین تعدیل شده( Adjusted R squared) و                    آزمون اف( F- test)
+E34 = https://youtube.com/watch?v=i4YrI7-vbAk
+آموزش علم داده - مفروضات رگرسیون
+E35 = https://youtube.com/watch?v=DwuFYxg0f4Y
+آموزش علم داده - رگرسیون چندگانه و داده‌های مجازی Dummy Variables
+E36 = https://youtube.com/watch?v=90BQoeNsmPM
+آموزش علم داده - پیش‌بینی با استفاده از مدل رگرسیون چندگانه
+E37 = https://youtube.com/watch?v=CyJlrlkFhp4
+آموزش علم داده - رگرسیون چندگانه و مدل قیمت خانه
+E38 = https://youtube.com/watch?v=oD2e5_pK7LA
+آموزش علم داده - ورود به دنیای سای کیت لرن (Scikit Learn)
+E39 = https://youtube.com/watch?v=3R9gJqAcRlw
+آموزش علم داده - رگرسیون خطی ساده با سای کیت لرن Scikit Learn
+E40 = https://youtube.com/watch?v=wt1tPxQmli4
+آموزش علم داده - رگرسیون خطی چندگانه با سای کیت لرن
+E41 = https://youtube.com/watch?v=m5nwSKsJIV8
+آموزش علم داده - پیش‌بینی رگرسیون چندگانه با داده‌های استاندارد
+E42 = https://youtube.com/watch?v=CcoYzXhgB-Y
+آموزش علم داده - جداسازی بصورت آموزش (تمرین ) و تست (Train and Test)
+E43 = https://youtube.com/watch?v=GTRL1F6ZKb8
+آموزش علم داده - پروژه‌ی پیش‌بینی قیمت ماشین پیش پردازش
+E44 = https://youtube.com/watch?v=X8KMeNzgM90
+آموزش علم داده - پروژه‌ی عملی پیش‌بینی قیمت ماشین بررسی مفروضات رگرسیون
+E45 = https://youtube.com/watch?v=ziWxiwQiPF8
+آموزش علم داده - پروژه‌ی پیش‌بینی قیمت ماشین ( افزودن متغیرهای مجازی(Dummy))
+E46 = https://youtube.com/watch?v=88bFEOCXYPs
+آموزش علم داده - پروژه‌ی پیش‌بینی قیمت ماشین (معرفی مدل رگرسیون)
+E47 = https://youtube.com/watch?v=H_n7rnI7pjw
+آموزش علم داده - پروژه‌ی تخمین قیمت ماشین ( آزمون و بررسی مدل )
+E48 = https://youtube.com/watch?v=JGh97w7wPKo
+آموزش علم داده - مشاهده یک مدل پیاده شده روی یک سایت
+E49 = https://youtube.com/watch?v=oWs1TGRfUas
+آموزش علم داده - ورود به رگرسیون لجستیک
+E50 = https://youtube.com/watch?v=zUYDMhuLPHc
+آموزش علم داده - مدل رگرسیون لجستیک و لاجیت
+E51 = https://youtube.com/watch?v=0cER0_RL0Hg
+آموزش علم داده - بررسی برخی از عناصر جدول مدل رگرسیون
+E52 = https://youtube.com/watch?v=uL09EdDxWJ8
+آموزش علم داده - درستی و تست مدل رگرسیون لجستیک
+E53 = https://youtube.com/watch?v=vwuuc80KeFI
+آموزش علم داده - مثالی از رگرسیون لجستیک با سای کیت لرن
+E54 = https://youtube.com/watch?v=4LEWjSFMRPs
+آموزش علم داده - ورود به دنیای خوشه‌بندی
+E55 = https://youtube.com/watch?v=U20NvEG7Leg
+آموزش علم داده - پروژه‌ی علم داده - یافتن مدلی برای قبولی دانش‌آموزان
+E56 = https://youtube.com/watch?v=C3klts8gwH8
+آموزش علم داده - خوشه‌بندی به روش K-Means
+E57 = https://youtube.com/watch?v=KelLC3heYMk
+آموزش علم داده - خوشه‌بندی به روش K-Means در محیط ژوپیتر
+E58 = https://youtube.com/watch?v=uYz7x60PYL4
+آموزش علم داده - نکاتی در خصوص خوشه‌بندی و استانداردسازی ویژگی‌ها
+E59 = https://youtube.com/watch?v=kQwyl1XUtH4
+آموزش علم داده - یافتن بهینه‌ترین تعداد از خوشه‌ها با استفاده از WCSS
+E60 = https://youtube.com/watch?v=qs7oXjNk8Jw
+آموزش علم داده - جداسازی بازار و خوشه‌بندی در محیط ژوپیتر
+E61 = https://youtube.com/watch?v=OE489-iUiCE
+آموزش علم داده - بکارگیری خوشه‌بندی در طبقه‌بندی کشورها و دیتاست گیاه زنبق
+E62 = https://youtube.com/watch?v=eoB1nF0gkjw
+آموزش علم داده - خوشه‌بندی سلسه مراتبی و نمودار درختی
+E63 = https://youtube.com/watch?v=yzF9P6AhOnM
+آموزش علم داده - مثالی از خوشه‌بندی سلسله مراتبی در پایتون
+E64 = https://youtube.com/watch?v=YwbwNRqPMjE
+آموزش علم داده - یادگیری ماشین و عمیق به زبان ساده
+E65 = https://youtube.com/watch?v=qyeYNdBGEMk
+آموزش علم داده - اجزای یادگیری ماشین
+E66 = https://youtube.com/watch?v=O0TskbN0_dU
+آموزش علم داده - یک مثال ملموس از کارکرد نرخ یادگیری در محیط اکسل
+E67 = https://youtube.com/watch?v=raAmuZXAgmQ
+آموزش علم داده - ساختن یک الگوریتم یادگیری ماشین از صفر با نامپای
+E68 = https://youtube.com/watch?v=DMqrN_fiR6U
+آموزش علم داده - نکته‌ی تکمیلی در خصوص ساختن الگوریتم با نامپای
+E69 = https://youtube.com/watch?v=2n9azr0YBAI
+🔥 آموزش علم داده(دیتاساینس) | نکاتی در خصوص تنسورفلو و طریقه‌ی نصب آن
+E70 = https://youtube.com/watch?v=PPXdfeZoJ4o
+آموزش علم داده(دیتاساینس) | نوشتن یک الگوریتم یادگیری ماشین با استفاده از تنسورفلو
+E71 = https://youtube.com/watch?v=hbPeeK37Pe8
+آموزش علم داده - مقدمه‌ای بر شبکه‌های عصبی عمیق همراه با معرفی کتاب
+E72 = https://youtube.com/watch?v=YBtPJScwTjo
+آموزش علم داده - بیش‌برازش و روش‌های شناخت و رفع آن
+E73 = https://youtube.com/watch?v=phO1oPdA5Rk
+آموزش علم داده - مقداردهی اولیه به وزن‌ها Initialization
+E74 = https://youtube.com/watch?v=lYj0tCu_CfQ
+آموزش علم داده - گرادیان کاهشی تصادفی و تکانه (SGD and momentum)
+E75 = https://youtube.com/watch?v=ky55918zwyA
+آموزش علم داده - نکاتی تکمیلی در خصوص نرخ یادگیری
+E76 = https://youtube.com/watch?v=kr3aBarzlFg
+آموزش علم داده - آشنایی با سه بهینه‌ساز بسیار مهم در یادگیری ماشین
+E77 = https://youtube.com/watch?v=hVz-XHz50ag
+آموزش علم داده - نکاتی تکمیلی در خصوص پیش‌پردازش
+E78 = https://youtube.com/watch?v=v3I_xxaIu8c
+آموزش علم داده - نکاتی در خصوص دیتاست MNIST
+E79 = https://youtube.com/watch?v=F9oQ3kZ4tko
+آموزش علم داده - پروژه‌ی استخراج اعداد از دیتاست MNIST با استفاده از تنسورفلو
+E80 = https://youtube.com/watch?v=wR6urUQNTI8
+آموزش علم داده - پروژه‌ی پیش‌بینی خرید مجدد مشتریان از یک پلت‌فرم فروش کتاب صوتی
+E81 = https://youtube.com/watch?v=H9U29q7tb7E
+پروژه‌ی پیش‌بینی خرید مجدد مشتریان از یک پلت‌فرم فروش کتاب صوتی بخش دوم
+E82 = https://youtube.com/watch?v=XiIkFpg8iLw
+ساخت یک سیستم پیش بینی حضور و غیاب کارکنان با پایتون(Python)
+E83 = https://youtube.com/watch?v=98ReAv9vn5s
+[Private video]
+E84 = https://youtube.com/watch?v=uCJ58KnyK1Y
+بعد از گذراندن اولین دوره علم داده چه کنیم؟
+E85 = https://youtube.com/watch?v=rjAutKPVbGw
+کارگاه مدیریت پروژه‌های علم داده | دکتر محمد فزونی
+E86 = https://youtube.com/watch?v=wsLs6fja3gw
