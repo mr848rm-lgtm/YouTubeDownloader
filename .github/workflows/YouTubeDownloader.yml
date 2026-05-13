@@ -1,10 +1,10 @@
-name: 🎯 YouTube Downloader (Batch)
+name: YouTube Downloader Batch
 
 on:
   workflow_dispatch:
     inputs:
       mode:
-        description: '🔄 Download Mode'
+        description: 'Download mode'
         required: true
         type: choice
         options:
@@ -14,11 +14,11 @@ on:
           - search
         default: 'single'
       url:
-        description: '🎬 URL / Search / Channel'
+        description: 'URL or search query'
         required: true
         type: string
       type:
-        description: '📦 Output Type'
+        description: 'Output type'
         required: true
         type: choice
         options:
@@ -31,17 +31,17 @@ on:
         type: string
         default: '720'
       start:
-        description: 'شماره شروع (پیش‌فرض 1)'
+        description: 'Start number'
         required: false
         type: number
         default: 1
       end:
-        description: 'شماره پایان (مثلاً 10)'
+        description: 'End number'
         required: false
         type: number
         default: 10
       split_threshold_mb:
-        description: 'Split > MB (0=no)'
+        description: 'Split if larger than MB (0 to disable)'
         required: false
         type: number
         default: 50
@@ -52,12 +52,10 @@ env:
 
 jobs:
   download-and-process:
-    name: 🚀 YouTube Downloader (Batch)
     runs-on: ubuntu-latest
     timeout-minutes: 120
     permissions:
       contents: write
-
     steps:
       - uses: actions/checkout@v4
         with:
@@ -69,13 +67,13 @@ jobs:
           path: ~/.cache/pip
           key: pip-${{ runner.os }}
 
-      - name: ⚡ Setup
+      - name: Setup tools
         run: |
           python3 -c "import requests" 2>/dev/null || pip3 install -q requests
           command -v yt-dlp &>/dev/null || pip3 install -q yt-dlp
           command -v zip &>/dev/null || (sudo apt-get update -qq && sudo apt-get install -y -qq zip)
 
-      - name: 🔗 Prepare
+      - name: Prepare URL
         id: prep
         run: |
           M="${{ github.event.inputs.mode }}"
@@ -84,8 +82,7 @@ jobs:
           echo "URL=$U" >> $GITHUB_OUTPUT
           echo "MODE=$M" >> $GITHUB_OUTPUT
 
-      - name: 🎯 Download & Process
-        id: main
+      - name: Download and process
         env:
           MODE: ${{ steps.prep.outputs.MODE }}
           URL: ${{ steps.prep.outputs.URL }}
@@ -186,11 +183,9 @@ jobs:
           def gvl(u, n):
               channel_folder = get_channel_from_url(u)
               if not channel_folder and 'playlist' in u:
-                  print(f'   🔍 Detecting channel from playlist...')
                   channel_folder = get_channel_from_playlist(u)
               if not channel_folder:
                   channel_folder = 'playlist_videos'
-              print(f'   📁 Folder: {channel_folder}_videos')
               
               c = ['yt-dlp', '--flat-playlist', '--dump-json', '--no-warnings', '--no-check-certificate']
               if n > 0: c.extend(['--playlist-end', str(n)])
@@ -204,7 +199,6 @@ jobs:
                           vid = d.get('id', '')
                           if not vid: continue
                           title = d.get('title', 'Untitled')[:60]
-                          print(f'   📊 [{len(v)+1}/{n}] {title}...')
                           ch, vw, dr, _ = gv(vid)
                           if not ch or ch == 'Unknown':
                               ch = (d.get('channel') or d.get('uploader') or 
@@ -220,46 +214,8 @@ jobs:
                               'v': fm(vw)
                           })
                       except Exception as e:
-                          print(f'      ⚠️ Skip: {str(e)[:40]}')
                           continue
               return v, channel_folder
-
-          def mkidx(v, cn, cd):
-              ts = datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
-              Path('./playlists').mkdir(exist_ok=True)
-              inf = cd / 'info'
-              inf.mkdir(parents=True, exist_ok=True)
-              idxf = f'playlists/{cn}_{ts}.md'
-              m = (f'# 📺 {cn}\n\n**{datetime.now():%Y-%m-%d %H:%M}** | **{len(v)} videos**\n\n'
-                   f'| # | Thumbnail | Title | Duration | Views |\n'
-                   f'|---|-----------|-------|----------|-------|\n')
-              for i, x in enumerate(v, 1):
-                  dur_str = f'{x["dr"]//60}:{x["dr"]%60:02d}' if x['dr'] else '?'
-                  m += f'| {i} | [<img src="{x["th"]}" width="80">]({x["u"]}) | [{x["t"]}]({x["u"]}) | {dur_str} | {x["v"]} |\n'
-              m += '\n---\n\n## 📝 Details\n\n'
-              for i, x in enumerate(v, 1):
-                  sn = f'v{i:03d}_{x["id"]}'
-                  dur_str = f'{x["dr"]//60} minutes' if x['dr'] else 'Unknown'
-                  info_md = (f'# 🎬 {x["t"]}\n\n'
-                            f'![Thumbnail]({x["th"]})\n\n'
-                            f'## Info\n\n'
-                            f'| Property | Value |\n|----------|-------|\n'
-                            f'| **Channel** | {x["c"]} |\n'
-                            f'| **Duration** | {dur_str} |\n'
-                            f'| **Views** | {x["v"]} |\n'
-                            f'| **Video ID** | `{x["id"]}` |\n'
-                            f'| **URL** | {x["u"]} |\n\n'
-                            f'## Thumbnail\n\n'
-                            f'<img src="{x["th"]}" width="640">\n\n'
-                            f'---\n*Downloaded: {datetime.now():%Y-%m-%d %H:%M}*')
-                  (inf / f'{sn}.md').write_text(info_md)
-                  m += (f'### {i}. {x["t"]}\n\n'
-                       f'![Thumbnail]({x["th"]})\n\n'
-                       f'- **{dur_str}** | **{x["v"]}** views | **{x["c"]}**\n'
-                       f'- 📄 [info/{sn}.md](info/{sn}.md)\n\n---\n\n')
-              Path(idxf).write_text(m)
-              print(f'📄 Index: {idxf}')
-              return idxf
 
           def dl_video(u):
               e = 'mp3' if T == 'audio' else 'mp4'
@@ -269,7 +225,6 @@ jobs:
 
               for retry in range(3):
                   if retry > 0:
-                      print(f'   🔄 Retry {retry}/3...')
                       time.sleep(5)
                   try:
                       rr = rq.post(API, json=p, headers=H, timeout=15)
@@ -277,7 +232,6 @@ jobs:
                       d = rr.json()
                       su = d.get('statusUrl')
                       if not su: continue
-                      print(f'   ⏳ Converting...')
                       for _ in range(60):
                           time.sleep(2)
                           try:
@@ -303,112 +257,81 @@ jobs:
                           for chunk in dr.iter_content(65536):
                               f.write(chunk)
                               done += len(chunk)
-                              if total > 0 and done % (10*65536) == 0:
-                                  print(f'\r   ⬇️ {done*100/total:.1f}%', end='')
-                      print(f'\r   ⬇️ 100.0%')
                       return filepath.stat().st_size
-              except Exception as e:
-                  print(f'   ❌ Download error: {e}')
+              except: pass
               return 0
 
           def split_file(filepath, threshold_mb):
               size_mb = filepath.stat().st_size / 1e6
               if threshold_mb > 0 and size_mb > threshold_mb:
-                  print(f'   ✂️ Splitting ({size_mb:.0f}MB) into {threshold_mb}MB parts...')
                   parent = filepath.parent
                   name = filepath.name
                   subprocess.run(['zip', '-r', '-q', '-s', f'{threshold_mb}m', f'{name}.zip', name], cwd=parent, check=True)
                   filepath.unlink()
-                  parts = sorted(parent.glob(f'{name}.z*'))
-                  print(f'   ✅ Split into {len(parts)} parts')
                   return True
               return False
 
-          # ─────────────────────────────────────
-          #  MODE: PLAYLIST / CHANNEL → با بازه دلخواه
-          # ─────────────────────────────────────
           if M in ('playlist', 'channel'):
-              print(f'\n📋 استخراج ویدئوها...')
-              # اول کل لیست رو تا END می‌گیریم (چون START و END رو بعداً اعمال می‌کنیم)
-              v, cn = gvl(U, END)   # فقط تا END استخراج کن
+              v, cn = gvl(U, END)
               if not v:
-                  print('❌ هیچ ویدئویی پیدا نشد')
+                  print('No videos found')
                   sys.exit(1)
 
-              # اعمال بازه
               start_idx = START - 1
               end_idx = min(END, len(v))
               batch = v[start_idx:end_idx]
 
-              print(f'\n📊 بازه دانلود: {START} تا {end_idx} (از {len(v)} ویدئو)')
               if not batch:
-                  print('❌ بازه خالی است')
+                  print('Empty batch')
                   sys.exit(1)
 
               cd = Path(f'downloads/{cn}_videos')
               cd.mkdir(parents=True, exist_ok=True)
 
-              print(f'\n📝 ساخت ایندکس برای این بازه...')
-              # ایندکس مخصوص این batch
               ts = datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
+              Path('./playlists').mkdir(parents=True, exist_ok=True)
               idx_path = Path(f'playlists/{cn}_batch_{START}_{end_idx}_{ts}.md')
-              m = (f'# 📺 {cn} (ویدئوهای {START} تا {end_idx})\n\n'
+              m = (f'# {cn} (videos {START}-{end_idx})\n\n'
                    f'**{datetime.now():%Y-%m-%d %H:%M}** | **{len(batch)} videos**\n\n')
               for i, x in enumerate(batch, start=START):
                   dur_str = f'{x["dr"]//60}:{x["dr"]%60:02d}' if x['dr'] else '?'
                   m += f'| {i} | [<img src="{x["th"]}" width="80">]({x["u"]}) | [{x["t"]}]({x["u"]}) | {dur_str} | {x["v"]} |\n'
               idx_path.write_text(m)
-              print(f'📄 ایندکس: {idx_path}')
 
               ok, fl = [], []
-              print(f'\n📥 دانلود {len(batch)} ویدئو...\n{"="*50}')
               for i, x in enumerate(batch, start=START):
-                  print(f'\n📥 [{i}/{end_idx}] {x["t"]}')
-                  print(f'   Channel: {x["c"]} | Duration: {x["dr"]//60}m | Views: {x["v"]}')
-
                   result = dl_video(x['u'])
                   if result:
                       fp = cd / f'v{i:03d}_{x["id"]}.{result["e"]}'
                       size = download_file(result['u'], fp)
                       if size:
-                          print(f'   ✅ دانلود شد ({size/1e6:.1f}MB)')
                           split_file(fp, SP)
                           ok.append(x['t'])
                       else:
-                          print(f'   ❌ خطا در دانلود')
                           fl.append(x['t'])
                   else:
-                      print(f'   ❌ تبدیل ناموفق')
                       fl.append(x['t'])
                   if i < end_idx:
-                      print(f'   ⏳ صبر...')
                       time.sleep(2)
 
-              # ساخت فایل ZIP از کل batch
               zip_name = f'{cn}_videos_part_{START}_{end_idx}'
               zip_path = cd / f'{zip_name}.zip'
-              print(f'\n📦 ساخت فایل ZIP: {zip_path}')
-              # همه فایل‌های ویدئویی داخل cd رو زیپ کن
               subprocess.run(['zip', '-r', '-q', str(zip_path), '.'], cwd=cd, check=True)
-              print(f'✅ ZIP آماده شد: {zip_path.name}')
 
               Path('/tmp/meta.json').write_text(json.dumps({
                   'm': M, 'cd': str(cd), 'ok': len(ok), 'fl': len(fl), 'total': len(batch)
               }))
-              print(f'\n{"="*50}')
-              print(f'📊 {len(ok)}/{len(batch)} با موفقیت دانلود شد')
-              if fl: print(f'❌ ناموفق: {fl}')
-              print(f'{"="*50}')
+              print(f'{len(ok)}/{len(batch)} downloaded')
+              if fl: print(f'Failed: {fl}')
 
           elif M == 'search':
-              # حالت جستجو بدون تغییر (از START/END استفاده نمی‌کنیم)
               v, _ = gvl(f'ytsearch{END}:{U}', END)
-              if not v: print('❌ No results'); sys.exit(1)
+              if not v: print('No results'); sys.exit(1)
               ts = datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
               Path('./searches').mkdir(exist_ok=True)
               qs = safe_name(U, 30)
               f = f'searches/{qs}_{ts}.md'
-              m = (f'# 🔍 Search: {U}\n\n**{datetime.now():%Y-%m-%d %H:%M}** | **{len(v)} results**\n\n'
+              m = (f'# Search: {U}\n\n**{datetime.now():%Y-%m-%d %H:%M}** | **{len(v)} results**\n\n'
                    f'| # | Thumbnail | Title | Channel | Views | Duration |\n'
                    f'|---|-----------|-------|---------|-------|----------|\n')
               for i, x in enumerate(v, 1):
@@ -421,10 +344,8 @@ jobs:
                        f'| Views | {x["v"]} |\n| ID | `{x["id"]}` |\n| URL | {x["u"]} |\n\n---\n\n')
               Path(f).write_text(m)
               Path('/tmp/meta.json').write_text(json.dumps({'m': 'search', 'ok': 0}))
-              print(f'✅ {f}')
 
           else:
-              # حالت single بدون تغییر
               vid_match = re.search(r'(?:v=|/)([\w-]{11})', U)
               vid = vid_match.group(1) if vid_match else 'x'
               ch, _, _, handle = gv(vid)
@@ -436,51 +357,26 @@ jobs:
                   fp = cd / f'v_{vid}.{result["e"]}'
                   size = download_file(result['u'], fp)
                   if size:
-                      print(f'✅ ذخیره در {cn}_videos/ ({size/1e6:.1f}MB)')
                       split_file(fp, SP)
-              else:
-                  print('❌ Failed'); sys.exit(1)
-          
           PYEOF
 
-      - name: 📤 Push Files
+      - name: Push to repository
         run: |
-          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-          echo "📤 ارسال به گیت‌هاب"
-          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-          
           git config user.name "github-actions[bot]"
           git config user.email "bot@github.com"
-          
           git add -A
-          
           TOTAL=$(git diff --cached --name-only | wc -l)
-          echo "   📁 $TOTAL فایل یافت شد"
-          
           if [ "$TOTAL" -eq 0 ]; then
-            echo "❌ چیزی برای ارسال نیست"
+            echo "Nothing to push"
             exit 0
           fi
-          
-          git diff --cached --name-only | while read f; do
-            echo "   📎 $f"
-          done
-          
-          echo ""
-          echo "📤 درحال ارسال..."
-          
-          git commit -m "📦 $(date +%m%d-%H%M) [skip ci]" --quiet
-          
+          git commit -m "Update $(date +%m%d-%H%M) [skip ci]" --quiet
           for i in 1 2 3 4 5; do
-            echo -n "   🚀 تلاش $i/5..."
             if git pull --rebase --quiet 2>/dev/null && git push --quiet 2>/dev/null; then
-              echo " ✅ انجام شد!"
               exit 0
             fi
-            echo " ❌"
             git rebase --abort 2>/dev/null
             [ $i -lt 5 ] && sleep $((i*5))
           done
-          
-          echo "   ❌ ارسال ناموفق"
+          echo "Push failed"
           exit 1
