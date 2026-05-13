@@ -1,4 +1,4 @@
-name: Telegram Proxy (disguised as GitHub)
+name: Fake TLS Proxy (dd mode)
 
 on:
   workflow_dispatch:
@@ -7,30 +7,31 @@ jobs:
   proxy:
     runs-on: ubuntu-latest
     steps:
-      - name: Start proxy with fake TLS (disguise as github.com)
+      - name: Start proxy with fake TLS (dd mode)
         run: |
-          # اجرای پروکسی با DOMAIN=github.com تا ترافیک مثل HTTPS گیت‌هاب بشه
-          # خود کانتینر یک secret تصادفی تولید می‌کنه
+          # تولید یک secret تصادفی ۳۲ کاراکتری
+          SECRET_HEX=$(openssl rand -hex 16)
+
+          # اجرای کانتینر با DOMAIN و SECRET_= این متغیر
+          # برای فعال شدن dd حتماً باید SECRET رو پاس بدیم
           docker run -d --name mtproto-proxy \
             -p 443:443 \
             -e DOMAIN=github.com \
+            -e SECRET=${SECRET_HEX} \
             telegrammessenger/proxy:latest
 
-          # صبر کن بالا بیاد
           sleep 15
 
-          # لینک کامل پروکسی (با پیشوند dd) از لاگ استخراج کن
-          PROXY_LINK=$(docker logs mtproto-proxy 2>&1 | grep -oP 'tg://proxy\?[^ ]*')
-          if [ -z "$PROXY_LINK" ]; then
-            echo "Retrying..."
-            sleep 10
-            PROXY_LINK=$(docker logs mtproto-proxy 2>&1 | grep -oP 'tg://proxy\?[^ ]*')
-          fi
+          # IP عمومی
+          SERVER_IP=$(curl -s ifconfig.me)
+
+          # لینک نهایی (با پیشوند dd)
+          PROXY_LINK="tg://proxy?server=${SERVER_IP}&port=443&secret=dd${SECRET_HEX}"
 
           echo "========================================="
-          echo "Your disguised proxy link:"
+          echo "Proxy link (paste into Telegram):"
           echo "$PROXY_LINK"
           echo "========================================="
 
-          # زنده نگه داشتن ۶ ساعت
+          # زنده نگه‌داشتن تا ۶ ساعت
           sleep 21000
