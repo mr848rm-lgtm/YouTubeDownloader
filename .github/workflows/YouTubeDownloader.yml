@@ -1,37 +1,70 @@
-name: Fake TLS Proxy (dd mode)
+name: V2Ray Server with Limit
 
 on:
   workflow_dispatch:
 
 jobs:
-  proxy:
+  v2ray:
     runs-on: ubuntu-latest
+    env:
+      UUID: "12345678-1234-1234-1234-123456789abc"  # یه UUID ثابت از خودت بذار
+      PORT: 443
+      SPEED_LIMIT: "400k"  # سرعت حدود ۴۰۰ کیلوبایت
+      TRAFFIC_LIMIT: "100"  # گیگابایت
     steps:
-      - name: Start proxy with fake TLS (dd mode)
+      - name: Install V2Ray and setup
         run: |
-          # تولید یک secret تصادفی ۳۲ کاراکتری
-          SECRET_HEX=$(openssl rand -hex 16)
+          # نصب V2Ray
+          bash <(curl -L https://raw.githubusercontent.com/v2fly/fhs-install-v2ray/master/install-release.sh)
+          
+          # ایجاد فایل کانفیگ
+          cat > /usr/local/etc/v2ray/config.json << EOF
+          {
+            "log": {"loglevel": "warning"},
+            "inbounds": [{
+              "port": $PORT,
+              "protocol": "vmess",
+              "settings": {
+                "clients": [{"id": "$UUID"}]
+              },
+              "streamSettings": {
+                "network": "ws",
+                "wsSettings": {"path": "/ws"}
+              }
+            }],
+            "outbounds": [{"protocol": "freedom"}]
+          }
+          EOF
+          
+          # اجرای V2Ray
+          systemctl start v2ray
+          systemctl enable v2ray
 
-          # اجرای کانتینر با DOMAIN و SECRET_= این متغیر
-          # برای فعال شدن dd حتماً باید SECRET رو پاس بدیم
-          docker run -d --name mtproto-proxy \
-            -p 443:443 \
-            -e DOMAIN=github.com \
-            -e SECRET=${SECRET_HEX} \
-            telegrammessenger/proxy:latest
-
-          sleep 15
-
-          # IP عمومی
-          SERVER_IP=$(curl -s ifconfig.me)
-
-          # لینک نهایی (با پیشوند dd)
-          PROXY_LINK="tg://proxy?server=${SERVER_IP}&port=443&secret=dd${SECRET_HEX}"
-
+          # نمایش آی‌پی و لینک کانفیگ
+          IP=$(curl -s ifconfig.me)
           echo "========================================="
-          echo "Proxy link (paste into Telegram):"
-          echo "$PROXY_LINK"
+          echo "IP: $IP"
+          echo "Port: $PORT"
+          echo "UUID: $UUID"
+          echo "Network: ws"
+          echo "Path: /ws"
+          echo "V2RayNG Config: vmess://$(echo -n '{"v":"2","ps":"GitHub Actions V2Ray","add":"'$IP'","port":"'$PORT'","id":"'$UUID'","aid":"0","net":"ws","path":"/ws","type":"none"}' | base64 -w 0)"
           echo "========================================="
-
-          # زنده نگه‌داشتن تا ۶ ساعت
-          sleep 21000
+          
+          # محدودیت سرعت و حجم
+          # برای محدود کردن حجم می‌تونیم یه اسکریپت نظارتی بنویسیم
+          # که هر ثانیه میزان دیتای مصرفی رو چک کنه و بعد از رسیدن به حد، workflow رو بکشه.
+          # اینجا فقط یه نمونه‌ست:
+          (
+            DATA_USED=0
+            LIMIT=$(($TRAFFIC_LIMIT * 1024 * 1024 * 1024))  # به بایت
+            while true; do
+              sleep 10
+              # فرض می‌کنیم v2ray روی پورت ۴۴۳ گوش میده، ترافیک خروجی رو مانیتور می‌کنیم
+              # اینجا باید یه ابزار مثل iptables یا nethogs نصب کنی که دقیق‌تر باشه
+              # برای سادگی، فقط یه محدودیت زمانی می‌ذاریم (۶ ساعت)
+            done
+          ) &
+          
+          # زنده نگه داشتن workflow برای ۶ ساعت
+          sleep 6h
