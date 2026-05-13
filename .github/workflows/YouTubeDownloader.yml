@@ -1,70 +1,11 @@
-name: V2Ray Server with Limit
+name: Test
 
 on:
   workflow_dispatch:
 
 jobs:
-  v2ray:
+  test:
     runs-on: ubuntu-latest
-    env:
-      UUID: "12345678-1234-1234-1234-123456789abc"  # یه UUID ثابت از خودت بذار
-      PORT: 443
-      SPEED_LIMIT: "400k"  # سرعت حدود ۴۰۰ کیلوبایت
-      TRAFFIC_LIMIT: "100"  # گیگابایت
     steps:
-      - name: Install V2Ray and setup
-        run: |
-          # نصب V2Ray
-          bash <(curl -L https://raw.githubusercontent.com/v2fly/fhs-install-v2ray/master/install-release.sh)
-          
-          # ایجاد فایل کانفیگ
-          cat > /usr/local/etc/v2ray/config.json << EOF
-          {
-            "log": {"loglevel": "warning"},
-            "inbounds": [{
-              "port": $PORT,
-              "protocol": "vmess",
-              "settings": {
-                "clients": [{"id": "$UUID"}]
-              },
-              "streamSettings": {
-                "network": "ws",
-                "wsSettings": {"path": "/ws"}
-              }
-            }],
-            "outbounds": [{"protocol": "freedom"}]
-          }
-          EOF
-          
-          # اجرای V2Ray
-          systemctl start v2ray
-          systemctl enable v2ray
-
-          # نمایش آی‌پی و لینک کانفیگ
-          IP=$(curl -s ifconfig.me)
-          echo "========================================="
-          echo "IP: $IP"
-          echo "Port: $PORT"
-          echo "UUID: $UUID"
-          echo "Network: ws"
-          echo "Path: /ws"
-          echo "V2RayNG Config: vmess://$(echo -n '{"v":"2","ps":"GitHub Actions V2Ray","add":"'$IP'","port":"'$PORT'","id":"'$UUID'","aid":"0","net":"ws","path":"/ws","type":"none"}' | base64 -w 0)"
-          echo "========================================="
-          
-          # محدودیت سرعت و حجم
-          # برای محدود کردن حجم می‌تونیم یه اسکریپت نظارتی بنویسیم
-          # که هر ثانیه میزان دیتای مصرفی رو چک کنه و بعد از رسیدن به حد، workflow رو بکشه.
-          # اینجا فقط یه نمونه‌ست:
-          (
-            DATA_USED=0
-            LIMIT=$(($TRAFFIC_LIMIT * 1024 * 1024 * 1024))  # به بایت
-            while true; do
-              sleep 10
-              # فرض می‌کنیم v2ray روی پورت ۴۴۳ گوش میده، ترافیک خروجی رو مانیتور می‌کنیم
-              # اینجا باید یه ابزار مثل iptables یا nethogs نصب کنی که دقیق‌تر باشه
-              # برای سادگی، فقط یه محدودیت زمانی می‌ذاریم (۶ ساعت)
-            done
-          ) &
-          
-          # زنده نگه داشتن workflow برای ۶ ساعت
-          sleep 6h
+      - name: Say Hello
+        run: echo "Hello, GitHub Actions works!"
