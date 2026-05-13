@@ -1,41 +1,36 @@
-name: My MTProto Proxy (on/off)
+name: My Telegram Proxy (Docker)
 
 on:
-  workflow_dispatch:   # فقط با دست اجرا بشه
+  workflow_dispatch:   # اجرا با دکمه دستی
 
 jobs:
-  run-proxy:
+  proxy:
     runs-on: ubuntu-latest
     steps:
-      - name: Setup and Run MTProto Proxy
+      - name: Start proxy and keep alive
         run: |
-          # 1. ابزار لازم رو نصب کن
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq wget curl
+          # کانتینر رسمی پروکسی تلگرام رو روی پورت 443 اجرا کن
+          docker run -d --name mtproto-proxy -p 443:443 telegrammessenger/proxy:latest
 
-          # 2. دانلود پروژه سریع mtg (پروکسی تلگرام)
-          wget -q https://github.com/9seconds/mtg/releases/download/v2.1.0/mtg-linux-amd64.tar.gz
-          tar xzf mtg-linux-amd64.tar.gz
+          # صبر کن کانتینر بالا بیاد و secret رو بسازه (حدود ۱۰ ثانیه کافیه)
+          sleep 15
 
-          # 3. یه کلید رمز تصادفی 32 کاراکتری بساز (secret)
-          SECRET=$(openssl rand -hex 16)
-          echo "Your secret: $SECRET"
+          # secret رو از لاگ کانتینر استخراج کن
+          SECRET=$(docker logs mtproto-proxy 2>&1 | grep -oP 'secret=\K[0-9a-f]{32}')
+          if [ -z "$SECRET" ]; then
+            echo "Secret not found in logs, retrying..."
+            sleep 10
+            SECRET=$(docker logs mtproto-proxy 2>&1 | grep -oP 'secret=\K[0-9a-f]{32}')
+          fi
 
-          # 4. اجرای پروکسی روی پورت 443
-          #    با IP پیش‌فرض 0.0.0.0 (یعنی همه اینترفیس‌ها)
-          ./mtg run -b 0.0.0.0:443 --stats-bind 127.0.0.1:3128 ${SECRET} &
-          sleep 3
-
-          # 5. IP عمومی ماشین رو بگیر
+          # IP عمومی سرور گیت‌هاب رو بگیر
           SERVER_IP=$(curl -s ifconfig.me)
 
-          # 6. چاپ لینک پروکسی
+          # چاپ لینک نهایی
           echo "========================================="
-          echo "Proxy link (copy this):"
+          echo "Proxy link (copy this and put in Telegram):"
           echo "tg://proxy?server=${SERVER_IP}&port=443&secret=${SECRET}"
           echo "========================================="
-          echo "Now proxy is running. Keep this workflow alive."
 
-          # 7. زنده نگه داشتن workflow تا 5 ساعت و 50 دقیقه
-          #    (حداکثر 6 ساعت، یه کم کمتر می‌ذاریم که وقت اضافه نمونه)
-          sleep 21000   # 21000 ثانیه ≈ 5 ساعت و 50 دقیقه
+          # زنده نگه داشتن workflow (تا ۵ ساعت و ۵۰ دقیقه)
+          sleep 21000
