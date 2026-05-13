@@ -1,88 +1,54 @@
-name: VLESS Reality (No Install Script)
+name: VMess WS (No TLS)
 
 on:
   workflow_dispatch:
 
 jobs:
-  reality:
+  vmess:
     runs-on: ubuntu-latest
     env:
       UUID: "12345678-1234-1234-1234-123456789abc"
-      PORT: 443
-      TARGET: "www.microsoft.com"
+      PORT: 80
+      WSPATH: "/ws"
     steps:
-      - name: Install dependencies
+      - name: Install Xray (direct download)
         run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq curl wget unzip
-
-      - name: Download Xray binary from GitHub Releases
-        run: |
-          XRAY_URL="https://github.com/XTLS/Xray-core/releases/download/v1.8.23/Xray-linux-64.zip"
-          wget -q "$XRAY_URL" -O xray.zip
+          sudo apt-get update -qq && sudo apt-get install -y -qq curl wget unzip
+          wget -q "https://github.com/XTLS/Xray-core/releases/download/v1.8.23/Xray-linux-64.zip" -O xray.zip
           unzip -q xray.zip
           chmod +x xray
-          ls -l xray
 
-      - name: Generate Reality Keys
-        run: |
-          KEYS=$(./xray x25519)
-          PRIVATE_KEY=$(echo "$KEYS" | grep "Private key" | awk '{print $3}')
-          PUBLIC_KEY=$(echo "$KEYS" | grep "Public key" | awk '{print $3}')
-          echo "PRIVATE_KEY=$PRIVATE_KEY" >> $GITHUB_ENV
-          echo "PUBLIC_KEY=$PUBLIC_KEY" >> $GITHUB_ENV
-
-      - name: Create Config and Run Xray
+      - name: Create config and run
         run: |
           cat > config.json << EOF
           {
             "log": {"loglevel": "warning"},
             "inbounds": [{
               "port": $PORT,
-              "protocol": "vless",
+              "protocol": "vmess",
               "settings": {
-                "clients": [{"id": "$UUID", "flow": "xtls-rprx-vision"}],
-                "decryption": "none"
+                "clients": [{"id": "$UUID"}]
               },
               "streamSettings": {
-                "network": "tcp",
-                "security": "reality",
-                "realitySettings": {
-                  "show": false,
-                  "dest": "$TARGET:443",
-                  "xver": 0,
-                  "serverNames": ["$TARGET"],
-                  "privateKey": "$PRIVATE_KEY",
-                  "shortIds": [""]
-                }
+                "network": "ws",
+                "wsSettings": {"path": "$WSPATH"}
               }
             }],
             "outbounds": [{"protocol": "freedom"}]
           }
           EOF
 
-          # اجرا با sudo برای دسترسی به پورت ۴۴۳
           sudo ./xray run -config config.json &
           sleep 3
 
-          # نمایش اطلاعات اتصال
           IP=$(curl -s ifconfig.me)
           echo "========================================="
-          echo "VLESS Reality Config:"
+          echo "VMess WS Config:"
           echo "IP: $IP"
           echo "Port: $PORT"
           echo "UUID: $UUID"
-          echo "Flow: xtls-rprx-vision"
-          echo "PublicKey: $PUBLIC_KEY"
-          echo "SNI: $TARGET"
+          echo "Path: $WSPATH"
           echo ""
-          echo "Connection Link (copy this):"
-          echo "vless://$UUID@$IP:$PORT?encryption=none&flow=xtls-rprx-vision&security=reality&sni=$TARGET&fp=random&pbk=$PUBLIC_KEY#GitHub"
+          echo "Link: vmess://$(echo -n '{"v":"2","ps":"GitHubVMess","add":"'$IP'","port":"'$PORT'","id":"'$UUID'","aid":"0","net":"ws","path":"'$WSPATH'","type":"none"}' | base64 -w 0)"
           echo "========================================="
-
-          # محدودیت سرعت ۴۰۰ کیلوبایت
-          sudo tc qdisc add dev eth0 root handle 1: htb default 30 2>/dev/null || true
-          sudo tc class add dev eth0 parent 1: classid 1:1 htb rate 400kbit ceil 400kbit 2>/dev/null || true
-
-          # زنده نگه‌داشتن ۵ ساعت و ۵۰ دقیقه
           sleep 21000
