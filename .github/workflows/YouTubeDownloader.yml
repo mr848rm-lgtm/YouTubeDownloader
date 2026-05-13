@@ -7,7 +7,7 @@ jobs:
   reality:
     runs-on: ubuntu-latest
     env:
-      UUID: "12345678-1234-1234-1234-123456789abc"   # می‌تونی عوضش کنی
+      UUID: "12345678-1234-1234-1234-123456789abc"
       PORT: 443
       TARGET: "www.microsoft.com"
     steps:
@@ -18,12 +18,10 @@ jobs:
 
       - name: Download Xray binary from GitHub Releases
         run: |
-          # لینک مستقیم از github.com (باز)
           XRAY_URL="https://github.com/XTLS/Xray-core/releases/download/v1.8.23/Xray-linux-64.zip"
           wget -q "$XRAY_URL" -O xray.zip
           unzip -q xray.zip
           chmod +x xray
-          # مطمئن شو فایل هست
           ls -l xray
 
       - name: Generate Reality Keys
@@ -63,8 +61,8 @@ jobs:
           }
           EOF
 
-          # اجرای Xray در پس‌زمینه
-          ./xray run -config config.json &
+          # اجرا با sudo برای دسترسی به پورت ۴۴۳
+          sudo ./xray run -config config.json &
           sleep 3
 
           # نمایش اطلاعات اتصال
@@ -82,9 +80,9 @@ jobs:
           echo "vless://$UUID@$IP:$PORT?encryption=none&flow=xtls-rprx-vision&security=reality&sni=$TARGET&fp=random&pbk=$PUBLIC_KEY#GitHub"
           echo "========================================="
 
-          # اعمال محدودیت سرعت ۴۰۰ کیلوبایت
+          # محدودیت سرعت ۴۰۰ کیلوبایت
           sudo tc qdisc add dev eth0 root handle 1: htb default 30 2>/dev/null || true
           sudo tc class add dev eth0 parent 1: classid 1:1 htb rate 400kbit ceil 400kbit 2>/dev/null || true
 
-          # زنده نگه داشتن ۵ ساعت و ۵۰ دقیقه
+          # زنده نگه‌داشتن ۵ ساعت و ۵۰ دقیقه
           sleep 21000
