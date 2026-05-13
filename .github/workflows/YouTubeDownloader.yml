@@ -1,54 +1,105 @@
-name: VMess WS (No TLS)
+name: Temporary Telegram Channel Viewer
 
 on:
-  workflow_dispatch:
+  workflow_dispatch:  # فقط دستی اجرا بشه (با دکمه)
+  # schedule:         # اگر خواستی خودکار بشه میتونی کرون بزاری
+  #   - cron: '0 */5 * * *'  # هر ۵ ساعت یک بار (خاموشی داره!)
 
 jobs:
-  vmess:
+  viewer:
     runs-on: ubuntu-latest
     env:
-      UUID: "12345678-1234-1234-1234-123456789abc"
-      PORT: 80
-      WSPATH: "/ws"
+      # اینها را باید توی Settings > Secrets ست کنی
+      API_ID: ${{ secrets.API_ID }}
+      API_HASH: ${{ secrets.API_HASH }}
+      # شماره تلفنی که باهاش به تلگرام وصل می‌شه (اختیاری)
+      PHONE: ${{ secrets.PHONE }}
     steps:
-      - name: Install Xray (direct download)
-        run: |
-          sudo apt-get update -qq && sudo apt-get install -y -qq curl wget unzip
-          wget -q "https://github.com/XTLS/Xray-core/releases/download/v1.8.23/Xray-linux-64.zip" -O xray.zip
-          unzip -q xray.zip
-          chmod +x xray
+      - name: Checkout code (optional, we generate everything inline)
+        uses: actions/checkout@v4
 
-      - name: Create config and run
+      - name: Install Python dependencies
         run: |
-          cat > config.json << EOF
-          {
-            "log": {"loglevel": "warning"},
-            "inbounds": [{
-              "port": $PORT,
-              "protocol": "vmess",
-              "settings": {
-                "clients": [{"id": "$UUID"}]
-              },
-              "streamSettings": {
-                "network": "ws",
-                "wsSettings": {"path": "$WSPATH"}
-              }
-            }],
-            "outbounds": [{"protocol": "freedom"}]
-          }
-          EOF
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq python3-pip
+          pip3 install --quiet flask telethon
 
-          sudo ./xray run -config config.json &
+      - name: Write Flask + Telethon web app
+        run: |
+          cat > app.py << 'PYEOF'
+          import os
+          import asyncio
+          from flask import Flask, request, render_template_string
+          from telethon import TelegramClient, errors
+          from telethon.tl.functions.channels import JoinChannelRequest
+          from telethon.tl.functions.messages import SearchGlobalRequest
+          from telethon.tl.types import InputMessagesFilterEmpty
+
+          API_ID = int(os.environ["API_ID"])
+          API_HASH = os.environ["API_HASH"]
+          PHONE = os.environ.get("PHONE", "")
+          SESSION_NAME = "github_session"
+
+          client = TelegramClient(SESSION_NAME, API_ID, API_HASH)
+          client.start(phone=PHONE)  # اگر PHONE نباشه، لازمه در اجرای اول کد تأیید دستی وارد بشه (در workflow نمیشه)
+          # برای استفاده بی‌دردسر، حتماً شماره و کد تأیید رو قبلاً انجام بده و فایل session رو توی repo ذخیره کن.
+          # اینجا فرض می‌کنیم session با شماره ذخیره شده یا قبلاً با ورود دستی تنظیم شده.
+
+          app = Flask(__name__)
+
+          INDEX_HTML = """
+          <h2>جستجوی کانال تلگرام</h2>
+          <form method="POST">
+            <input name="channel" placeholder="@channelname" required>
+            <button type="submit">نمایش پیام‌ها</button>
+          </form>
+          {% if messages %}
+            <h3>آخرین پیام‌های @{{ channel }}</h3>
+            {% for msg in messages %}
+              <p><b>{{ msg.sender_id }}</b>: {{ msg.text[:200] }}</p>
+              <hr>
+            {% endfor %}
+          {% endif %}
+          {% if error %}
+            <p style="color:red">{{ error }}</p>
+          {% endif %}
+          """
+          @app.route("/", methods=["GET", "POST"])
+          def index():
+              channel = request.form.get("channel", "").strip()
+              if not channel:
+                  return render_template_string(INDEX_HTML)
+              try:
+                  entity = client.loop.run_until_complete(client.get_entity(channel))
+                  # اختیاری: عضو شدن
+                  # client.loop.run_until_complete(JoinChannelRequest(channel))
+                  messages = client.loop.run_until_complete(client.get_messages(entity, limit=10))
+                  return render_template_string(INDEX_HTML, messages=messages, channel=channel)
+              except Exception as e:
+                  return render_template_string(INDEX_HTML, error=str(e))
+
+          if __name__ == "__main__":
+              app.run(host="0.0.0.0", port=5000)
+          PYEOF
+
+      - name: Download cloudflared
+        run: |
+          wget -q https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64 -O cloudflared
+          chmod +x cloudflared
+
+      - name: Start web server and tunnel
+        run: |
+          # اجرای سرور در پس‌زمینه
+          python3 app.py &
           sleep 3
 
-          IP=$(curl -s ifconfig.me)
-          echo "========================================="
-          echo "VMess WS Config:"
-          echo "IP: $IP"
-          echo "Port: $PORT"
-          echo "UUID: $UUID"
-          echo "Path: $WSPATH"
-          echo ""
-          echo "Link: vmess://$(echo -n '{"v":"2","ps":"GitHubVMess","add":"'$IP'","port":"'$PORT'","id":"'$UUID'","aid":"0","net":"ws","path":"'$WSPATH'","type":"none"}' | base64 -w 0)"
-          echo "========================================="
+          # اجرای تونل cloudflared و گرفتن URL عمومی
+          ./cloudflared tunnel --url http://localhost:5000 2>&1 | tee tunnel.log &
+          sleep 10
+
+          # استخراج دامنه موقت trycloudflare
+          URL=$(grep -o 'https://.*trycloudflare.com' tunnel.log | head -1)
+          echo "🌐 سایت موقت شما: $URL"
+          echo "این لینک تا پایان اجرای workflow (حداکثر ۶ ساعت) فعال است."
+          # برای اینکه کنسول قفل نشه
           sleep 21000
