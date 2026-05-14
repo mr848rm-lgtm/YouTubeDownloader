@@ -1,4 +1,4 @@
-name: YouTube to Bale Bot (RAR 20MB)
+name: YouTube to RAR with Web Server
 
 on:
   workflow_dispatch:
@@ -20,7 +20,7 @@ on:
         options: [video, audio]
         default: 'video'
       quality:
-        description: 'Quality'
+        description: 'Quality (video: 144/360/480/720/1080, audio: 128/192/320)'
         required: false
         type: string
         default: '720'
@@ -35,29 +35,46 @@ on:
         type: number
         default: 0
       max_videos:
-        description: 'Max videos (used if end = 0)'
+        description: 'Max videos (used only if end = 0)'
         required: false
         type: number
         default: 0
+      rar_size_gb:
+        description: 'Size of each RAR part in GB'
+        required: false
+        type: number
+        default: 1
 
 env:
   PYTHONUNBUFFERED: '1'
   DEBIAN_FRONTEND: 'noninteractive'
 
 jobs:
-  download-and-send:
+  download-and-serve:
     runs-on: ubuntu-latest
     timeout-minutes: 360
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
 
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: pip-${{ runner.os }}
+
       - name: Install tools
         run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq rar unrar python3-pip
-          pip3 install -q requests yt-dlp
+          python3 -c "import requests" 2>/dev/null || pip3 install -q requests
+          command -v yt-dlp &>/dev/null || pip3 install -q yt-dlp
+          sudo apt-get update -qq && sudo apt-get install -y -qq rar zip unzip wget
 
-      - name: Prepare URL
+      - name: Install cloudflared
+        run: |
+          wget -q -O cloudflared "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64"
+          chmod +x cloudflared
+
+      - name: Prepare
         id: prep
         run: |
           MODE="${{ github.event.inputs.mode }}"
@@ -72,7 +89,7 @@ jobs:
           echo "URL=$URL" >> $GITHUB_OUTPUT
           echo "MODE=$MODE" >> $GITHUB_OUTPUT
 
-      - name: Download and RAR
+      - name: Download videos and create RAR files
         env:
           MODE: ${{ steps.prep.outputs.MODE }}
           URL: ${{ steps.prep.outputs.URL }}
@@ -81,9 +98,10 @@ jobs:
           START: ${{ github.event.inputs.start }}
           END: ${{ github.event.inputs.end }}
           MAX: ${{ github.event.inputs.max_videos }}
+          RAR_GB: ${{ github.event.inputs.rar_size_gb }}
         run: |
           python3 << 'PYEOF'
-          import os, sys, time, re, subprocess, hashlib
+          import os, json, time, re, subprocess, sys, hashlib, shutil
           from pathlib import Path
           from datetime import datetime
 
@@ -94,14 +112,35 @@ jobs:
           START = int(os.environ.get('START', '1'))
           END = int(os.environ.get('END', '0'))
           MAX = int(os.environ.get('MAX', '0'))
+          RAR_GB = float(os.environ.get('RAR_GB', '1'))
 
-          def safe_filename(title, maxlen=60):
+          API = 'https://hub.ytconvert.org/api/download'
+          HEADERS = {
+              'User-Agent': 'Mozilla/5.0',
+              'Accept': 'application/json',
+              'Content-Type': 'application/json',
+          }
+
+          def safe_name(text, maxlen=50):
+              s = re.sub(r'[^\w]', '_', str(text))[:maxlen]
+              s = re.sub(r'_+', '_', s).strip('_')
+              if not s:
+                  s = hashlib.md5(str(text).encode()).hexdigest()[:8]
+              return s
+
+          def safe_filename(title, maxlen=80):
               s = re.sub(r'[\\/*?:"<>|]', '', title)
               s = s.strip().replace(' ', '_')
-              s = re.sub(r'_+', '_', s)[:maxlen]
+              s = re.sub(r'_+', '_', s)
+              s = s[:maxlen]
               if not s:
                   s = hashlib.md5(title.encode()).hexdigest()[:16]
               return s
+
+          def get_channel_handle_from_url(url):
+              m = re.search(r'@([\w.-]+)', url)
+              if m: return m.group(1)
+              return None
 
           def collect_videos(playlist_url, limit):
               cmd = ['yt-dlp', '--flat-playlist', '--dump-json', '--no-warnings', '--no-check-certificate']
@@ -137,143 +176,181 @@ jobs:
                   payload['output']['quality'] = f'{QUALITY}p'
 
               filepath = output_dir / filename
-              API = 'https://hub.ytconvert.org/api/download'
-              headers = {'User-Agent': 'Mozilla/5.0', 'Content-Type': 'application/json'}
               for attempt in range(3):
                   try:
-                      resp = requests.post(API, json=payload, headers=headers, timeout=15)
-                      if resp.status_code != 200: continue
+                      resp = requests.post(API, json=payload, headers=HEADERS, timeout=15)
+                      if resp.status_code != 200:
+                          time.sleep(3)
+                          continue
                       data = resp.json()
                       status_url = data.get('statusUrl')
-                      if not status_url: continue
+                      if not status_url:
+                          continue
                       for _ in range(90):
                           time.sleep(2)
-                          sresp = requests.get(status_url, headers=headers, timeout=10)
-                          if sresp.status_code != 200: break
-                          sdata = sresp.json()
-                          if sdata.get('status') == 'completed':
-                              dl_url = sdata.get('downloadUrl')
-                              if dl_url:
-                                  with requests.get(dl_url, stream=True, timeout=600) as r:
-                                      r.raise_for_status()
-                                      with open(filepath, 'wb') as f:
-                                          for chunk in r.iter_content(8192):
-                                              f.write(chunk)
-                                  return filepath
-                          elif sdata.get('status') in ('failed', 'error'): break
-                  except: time.sleep(2)
+                          try:
+                              sresp = requests.get(status_url, headers=HEADERS, timeout=10)
+                              if sresp.status_code != 200:
+                                  break
+                              sdata = sresp.json()
+                              if sdata.get('status') == 'completed':
+                                  dl_url = sdata.get('downloadUrl')
+                                  if dl_url:
+                                      with requests.get(dl_url, stream=True, timeout=600) as r:
+                                          r.raise_for_status()
+                                          with open(filepath, 'wb') as f:
+                                              for chunk in r.iter_content(8192):
+                                                  f.write(chunk)
+                                      return filepath
+                              elif sdata.get('status') in ('failed', 'error'):
+                                  break
+                          except:
+                              continue
+                  except:
+                      time.sleep(2)
               return None
 
-          import requests, json
+          import requests
 
           print(f'Mode: {MODE}')
           print(f'URL: {URL}')
 
-          if MODE not in ('playlist', 'channel'):
-              print('Currently only playlist/channel mode supported for Bale upload.')
-              sys.exit(1)
+          if MODE in ('playlist', 'channel'):
+              limit = 0
+              if END > 0:
+                  limit = END
+              elif MAX > 0:
+                  limit = MAX
 
-          limit = 0
-          if END > 0: limit = END
-          elif MAX > 0: limit = MAX
+              videos = collect_videos(URL, limit)
+              if not videos:
+                  print('No videos found.')
+                  sys.exit(1)
 
-          videos = collect_videos(URL, limit)
-          if not videos:
-              print('No videos found.')
-              sys.exit(1)
+              if START > 1:
+                  videos = videos[START-1:]
+              if END > 0:
+                  videos = videos[:END - START + 1]
+              elif MAX > 0:
+                  videos = videos[:MAX]
 
-          if START > 1:
-              videos = videos[START-1:]
-          if END > 0:
-              videos = videos[:END - START + 1]
-          elif MAX > 0:
-              videos = videos[:MAX]
+              if not videos:
+                  print('No videos in range.')
+                  sys.exit(1)
 
-          if not videos:
-              print('No videos in range.')
-              sys.exit(1)
+              channel_handle = get_channel_handle_from_url(URL) or 'playlist'
+              folder_name = safe_name(channel_handle, 40)
+              output_dir = Path(f'downloads/{folder_name}')
+              output_dir.mkdir(parents=True, exist_ok=True)
 
-          output_dir = Path('downloads')
-          output_dir.mkdir(exist_ok=True)
+              downloaded_files = []
 
-          txt_lines = []
-          downloaded_files = []
+              for idx, v in enumerate(videos, start=START):
+                  print(f'[{idx}/{START+len(videos)-1}] {v["title"]}')
+                  ext = 'mp3' if TYPE == 'audio' else 'mp4'
+                  safe_title = safe_filename(v['title'])
+                  filename = f"E{idx} - {safe_title}.{ext}"
+                  filepath = download_video(v['url'], filename, output_dir)
+                  if filepath:
+                      downloaded_files.append(filepath)
+                      print(f'  Downloaded: {filepath.name}')
+                  else:
+                      print('  Failed.')
+                  time.sleep(1)
 
-          for idx, v in enumerate(videos, start=START):
-              print(f'[{idx}/{START+len(videos)-1}] {v["title"]}')
+              rar_base = output_dir / folder_name
+              max_bytes = int(RAR_GB * 1024 * 1024 * 1024)
+              current_size = 0
+              part_num = 1
+              current_batch = []
+              all_rar_files = []
+
+              for f in sorted(downloaded_files, key=lambda x: x.stat().st_size):
+                  fsize = f.stat().st_size
+                  if current_size + fsize > max_bytes and current_batch:
+                      rar_name = f'S{part_num}.rar'
+                      rar_path = output_dir / rar_name
+                      file_list = [str(p.resolve()) for p in current_batch]
+                      subprocess.run(['rar', 'a', '-m0', '-v1g', str(rar_path)] + file_list, check=True)
+                      all_rar_files.extend(sorted(output_dir.glob(f'S{part_num}*')))
+                      current_batch = []
+                      current_size = 0
+                      part_num += 1
+                  current_batch.append(f)
+                  current_size += fsize
+
+              if current_batch:
+                  rar_name = f'S{part_num}.rar'
+                  rar_path = output_dir / rar_name
+                  file_list = [str(p.resolve()) for p in current_batch]
+                  subprocess.run(['rar', 'a', '-m0', '-v1g', str(rar_path)] + file_list, check=True)
+                  all_rar_files.extend(sorted(output_dir.glob(f'S{part_num}*')))
+
+              for f in downloaded_files:
+                  f.unlink(missing_ok=True)
+
+              with open(output_dir / 'index.html', 'w', encoding='utf-8') as f:
+                  f.write('<html><body><h2>Download RAR parts</h2><ul>\n')
+                  for rar in sorted(all_rar_files):
+                      f.write(f'<li><a href="{rar.name}">{rar.name}</a></li>\n')
+                  f.write('</ul></body></html>')
+
+              print(f'Done. RAR files in {output_dir}')
+
+          elif MODE == 'single':
+              video_id_match = re.search(r'(?:v=|/)([\w-]{11})', URL)
+              if not video_id_match:
+                  print('Invalid URL'); sys.exit(1)
+              vid = video_id_match.group(1)
+              title, channel, _ = get_video_info(vid)
+              channel = safe_name(channel, 40)
+              out = Path(f'downloads/{channel}')
+              out.mkdir(parents=True, exist_ok=True)
               ext = 'mp3' if TYPE == 'audio' else 'mp4'
-              safe_title = safe_filename(v['title'])
-              filename = f"E{idx} - {safe_title}.{ext}"
-              filepath = download_video(v['url'], filename, output_dir)
+              filename = f"E1 - {safe_filename(title)}.{ext}"
+              filepath = download_video(URL, filename, out)
               if filepath:
-                  downloaded_files.append(filepath)
-                  txt_lines.append(f'{v["title"]}\nE{idx} = {v["url"]}')
-                  print(f'  Downloaded: {filepath.name}')
-              else:
-                  txt_lines.append(f'{v["title"]}\nE{idx} = FAILED')
-                  print('  Failed.')
-              time.sleep(1)
+                  rar_path = out / 'S1.rar'
+                  subprocess.run(['rar', 'a', '-m0', '-v1g', str(rar_path), str(filepath.resolve())], check=True)
+                  filepath.unlink()
+                  with open(out / 'index.html', 'w') as f:
+                      for rar in sorted(out.glob('S1*')):
+                          f.write(f'<a href="{rar.name}">{rar.name}</a><br>\n')
+                  print('Done.')
 
-          txt_path = output_dir / 'list.txt'
-          txt_path.write_text('\n'.join(txt_lines), encoding='utf-8')
-
-          if not downloaded_files:
-              print('Nothing downloaded.')
-              sys.exit(1)
-
-          archive_name = output_dir / 'playlist_archive.rar'
-          rar_cmd = ['rar', 'a', '-v20m', '-ep1', str(archive_name)] + [str(f) for f in downloaded_files]
-          subprocess.run(rar_cmd, check=True)
-
-          for f in downloaded_files:
-              f.unlink(missing_ok=True)
-
-          print(f'Archive parts created in {output_dir}')
+          elif MODE == 'search':
+              query = URL
+              limit = MAX if MAX > 0 else 10
+              videos = collect_videos(f'ytsearch{limit}:{query}', limit)
+              if not videos:
+                  print('No results.'); sys.exit(1)
+              out = Path(f'downloads/search_{safe_name(query)}')
+              out.mkdir(parents=True, exist_ok=True)
+              lines = []
+              for i, v in enumerate(videos, 1):
+                  lines.append(f'{v["title"]}\nE{i} = {v["url"]}')
+              (out / f'search_{safe_name(query)}.txt').write_text('\n'.join(lines), encoding='utf-8')
+              print(f'Search results saved to {out}')
           PYEOF
 
-      - name: Send RAR files to Bale bot
-        env:
-          BALE_BOT_TOKEN: ${{ secrets.BALE_BOT_TOKEN }}
-          BALE_CHAT_ID: ${{ secrets.BALE_CHAT_ID }}
+      - name: Start web server and tunnel
         run: |
-          python3 << 'PYEOF'
-          import requests, os, glob, sys
+          DOWNLOAD_DIR=$(find downloads -type d -mindepth 2 -maxdepth 2 | head -1)
+          [ -z "$DOWNLOAD_DIR" ] && DOWNLOAD_DIR="downloads"
+          cd "$DOWNLOAD_DIR"
 
-          BOT_TOKEN = os.environ['BALE_BOT_TOKEN']
-          CHAT_ID = os.environ['BALE_CHAT_ID']
-          BASE_URL = f'https://tapi.bale.ai/bot{BOT_TOKEN}'
+          nohup python3 -m http.server 8000 --bind 0.0.0.0 &
+          sleep 2
 
-          def send_document(filepath):
-              with open(filepath, 'rb') as f:
-                  response = requests.post(
-                      f'{BASE_URL}/sendDocument',
-                      data={'chat_id': CHAT_ID},
-                      files={'document': f}
-                  )
-                  return response
+          nohup ./cloudflared tunnel --url http://localhost:8000 --no-autoupdate > cf.log 2>&1 &
+          sleep 15
 
-          # Send list.txt first
-          list_file = 'downloads/list.txt'
-          if os.path.exists(list_file):
-              print(f'Sending {list_file}...')
-              resp = send_document(list_file)
-              if resp.ok:
-                  print('  list.txt sent.')
-              else:
-                  print(f'  Failed: {resp.text}')
+          TUNNEL_URL=$(grep -oP 'https://[a-z0-9-]+\.trycloudflare\.com' cf.log | head -1)
+          echo "========================================="
+          echo "Your download page is ready:"
+          echo "$TUNNEL_URL"
+          echo "========================================="
+          echo "Open the link above to download RAR files."
+          echo "The server will stay online for up to 6 hours."
 
-          # Send RAR parts
-          files = sorted(glob.glob('downloads/*.rar'))
-          if not files:
-              print('No RAR files found.')
-              sys.exit(0)
-
-          for filepath in files:
-              filesize = os.path.getsize(filepath) / (1024*1024)
-              print(f'Sending {filepath} ({filesize:.1f} MB)...')
-              resp = send_document(filepath)
-              if resp.ok:
-                  print('  OK')
-              else:
-                  print(f'  Failed: {resp.text}')
-          PYEOF
+          sleep 21000
