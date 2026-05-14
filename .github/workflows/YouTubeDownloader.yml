@@ -356,7 +356,9 @@ jobs:
           CHAT_ID: ${{ steps.prep.outputs.CHAT_ID }}
         run: |
           python3 << 'PYEOF'
-          import os, requests, time, glob
+          import os, requests, time, glob, urllib3
+
+          urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
           TOKEN = os.environ['BOT_TOKEN']
           BASE_URL = os.environ['API_BASE_URL']
@@ -386,17 +388,26 @@ jobs:
               file_size = os.path.getsize(file_path)
               print(f"Uploading {file_name} ({file_size} bytes)...")
 
-              with open(file_path, 'rb') as f:
-                  response = requests.post(
-                      f"{BASE_URL}/{TOKEN}/sendFile",
-                      files={'file': (file_name, f, 'application/x-rar-compressed')},
-                      data={'chat_id': chat_id, 'type': 'document'}
-                  )
-              
-              if response.status_code == 200:
-                  print(f"  File {file_name} sent successfully.")
-              else:
-                  print(f"  Failed to send {file_name}. Status: {response.status_code}, Response: {response.text}")
+              for attempt in range(3):
+                  try:
+                      with open(file_path, 'rb') as f:
+                          response = requests.post(
+                              f"{BASE_URL}/{TOKEN}/sendFile",
+                              files={'file': (file_name, f, 'application/x-rar-compressed')},
+                              data={'chat_id': chat_id, 'type': 'document'},
+                              verify=False,
+                              timeout=120
+                          )
+                      if response.status_code == 200:
+                          print(f"  File {file_name} sent successfully.")
+                          return True
+                      else:
+                          print(f"  Attempt {attempt+1}: Failed. Status: {response.status_code}, Response: {response.text}")
+                  except Exception as e:
+                      print(f"  Attempt {attempt+1}: Error: {e}")
+                  time.sleep(10)
+              print(f"  File {file_name} failed after 3 attempts.")
+              return False
 
           for rar_file in sorted(rar_files):
               send_file_to_rubika(rar_file, CHAT_ID)
