@@ -105,7 +105,7 @@ jobs:
           ZIP_GB: ${{ github.event.inputs.zip_size_gb }}
         run: |
           python3 << 'PYEOF'
-          import os, json, time, re, subprocess, sys, hashlib, shutil
+          import os, json, time, re, subprocess, sys, hashlib
           from pathlib import Path
           from datetime import datetime
 
@@ -131,6 +131,15 @@ jobs:
               s = re.sub(r'_+', '_', s).strip('_')
               if not s:
                   s = hashlib.md5(str(text).encode()).hexdigest()[:8]
+              return s
+
+          def safe_filename(title, maxlen=80):
+              s = re.sub(r'[\\/*?:"<>|]', '', title)
+              s = s.strip().replace(' ', '_')
+              s = re.sub(r'_+', '_', s)
+              s = s[:maxlen]
+              if not s:
+                  s = hashlib.md5(title.encode()).hexdigest()[:16]
               return s
 
           def get_video_info(video_id):
@@ -170,7 +179,7 @@ jobs:
                       continue
               return videos
 
-          def download_video(video_url, video_id, output_dir):
+          def download_video(video_url, filename, output_dir):
               ext = 'mp3' if TYPE == 'audio' else 'mp4'
               payload = {
                   'url': video_url,
@@ -185,6 +194,7 @@ jobs:
               else:
                   payload['output']['quality'] = f'{QUALITY}p'
 
+              filepath = output_dir / filename
               for attempt in range(3):
                   try:
                       resp = requests.post(API, json=payload, headers=HEADERS, timeout=15)
@@ -205,7 +215,6 @@ jobs:
                               if sdata.get('status') == 'completed':
                                   dl_url = sdata.get('downloadUrl')
                                   if dl_url:
-                                      filepath = output_dir / f'{video_id}.{ext}'
                                       with requests.get(dl_url, stream=True, timeout=600) as r:
                                           r.raise_for_status()
                                           with open(filepath, 'wb') as f:
@@ -247,11 +256,12 @@ jobs:
                   chunks.append(current_chunk)
 
               zip_paths = []
+              root = Path.cwd()
               for i, chunk in enumerate(chunks, start=1):
                   zip_name = f'{output_base}_part{i}.zip'
-                  zip_path = Path(zip_name)
-                  cmd = ['zip', '-0', '-q', '-r', str(zip_path)] + [f.name for f in chunk]
-                  subprocess.run(cmd, cwd=chunk[0].parent, check=True)
+                  zip_path = root / zip_name
+                  cmd = ['zip', '-0', '-q', '-r', str(zip_path)] + [str(f.relative_to(root)) for f in chunk]
+                  subprocess.run(cmd, cwd=root, check=True)
                   zip_paths.append(zip_path)
               return zip_paths
 
@@ -293,10 +303,13 @@ jobs:
 
               for idx, v in enumerate(videos, start=START):
                   print(f'[{idx}/{START+len(videos)-1}] {v["title"]}')
-                  filepath = download_video(v['url'], v['id'], output_dir)
+                  ext = 'mp3' if TYPE == 'audio' else 'mp4'
+                  safe_title = safe_filename(v['title'])
+                  filename = f"E{idx} - {safe_title}.{ext}"
+                  filepath = download_video(v['url'], filename, output_dir)
                   if filepath:
                       split_large_file(filepath, SPLIT_MB)
-                      final_file = filepath if filepath.exists() else sorted(output_dir.glob(f'{v["id"]}.*'))[0]
+                      final_file = filepath if filepath.exists() else sorted(output_dir.glob(f'E{idx} - {safe_title}*'))[0]
                       downloaded_files.append(final_file)
                       txt_lines.append(f'{v["title"]}\nE{idx} = {v["url"]}')
                       print(f'  Downloaded: {final_file.name}')
@@ -310,8 +323,8 @@ jobs:
 
               max_zip_bytes = int(ZIP_GB * 1024 * 1024 * 1024)
               if downloaded_files:
-                  zip_base = output_dir / folder_name
-                  create_zip_chunks(downloaded_files, str(zip_base), max_zip_bytes)
+                  zip_base = f"downloads/{folder_name}/{folder_name}"
+                  create_zip_chunks(downloaded_files, zip_base, max_zip_bytes)
                   for f in downloaded_files:
                       f.unlink(missing_ok=True)
 
@@ -326,7 +339,9 @@ jobs:
               channel = safe_name(channel, 40)
               out = Path(f'downloads/{channel}')
               out.mkdir(parents=True, exist_ok=True)
-              filepath = download_video(URL, vid, out)
+              ext = 'mp3' if TYPE == 'audio' else 'mp4'
+              filename = f"E1 - {safe_filename(title)}.{ext}"
+              filepath = download_video(URL, filename, out)
               if filepath:
                   split_large_file(filepath, SPLIT_MB)
                   (out / f'{channel}_list.txt').write_text(f'{title}\nE1 = {URL}', encoding='utf-8')
