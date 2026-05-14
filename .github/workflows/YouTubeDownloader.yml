@@ -87,7 +87,6 @@ jobs:
           echo "MODE=$MODE" >> $GITHUB_OUTPUT
 
           echo "Getting Chat ID from Rubika..."
-          
           RESPONSE=$(curl -s -X POST "${{ env.API_BASE_URL }}/${{ env.BOT_TOKEN }}/getUpdates" \
             -H "Content-Type: application/json" \
             -d '{"limit": 1}')
@@ -95,26 +94,22 @@ jobs:
           echo "Raw API response:"
           echo "$RESPONSE"
           
-          CHAT_ID=$(python3 << 'PYEOF'
+          CHAT_ID=$(echo "$RESPONSE" | python3 -c "
           import sys, json
           try:
-              data = json.loads(sys.argv[1])
-              if 'updates' in data and len(data['updates']) > 0:
+              data = json.load(sys.stdin)
+              if 'data' in data and 'updates' in data['data'] and len(data['data']['updates']) > 0:
+                  print(data['data']['updates'][0]['chat_id'])
+              elif 'updates' in data and len(data['updates']) > 0:
                   print(data['updates'][0]['chat_id'])
               elif 'result' in data and len(data['result']) > 0:
                   print(data['result'][0]['chat_id'])
-              elif 'data' in data and len(data['data']) > 0:
-                  print(data['data'][0]['chat_id'])
-              else:
-                  print('')
           except:
-              print('')
-          PYEOF
-          "$RESPONSE")
+              pass
+          ")
           
           if [ -z "$CHAT_ID" ]; then
-            echo "Could not get Chat ID automatically."
-            echo "Please send any message to your bot first, then re-run this workflow."
+            echo "Could not get Chat ID automatically. Please send a message to your bot first."
             exit 1
           fi
           
