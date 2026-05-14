@@ -69,7 +69,7 @@ jobs:
         run: |
           python3 -c "import requests" 2>/dev/null || pip3 install -q requests
           command -v yt-dlp &>/dev/null || pip3 install -q yt-dlp
-          sudo apt-get update -qq && sudo apt-get install -y -qq rar wget
+          sudo apt-get update -qq && sudo apt-get install -y -qq rar wget curl
 
       - name: Prepare and get Chat ID
         id: prep
@@ -87,7 +87,7 @@ jobs:
           echo "MODE=$MODE" >> $GITHUB_OUTPUT
 
           echo "Getting Chat ID from Rubika..."
-          RESPONSE=$(curl -s -X POST "${{ env.API_BASE_URL }}/${{ env.BOT_TOKEN }}/getUpdates" \
+          RESPONSE=$(curl -s -k -X POST "${{ env.API_BASE_URL }}/${{ env.BOT_TOKEN }}/getUpdates" \
             -H "Content-Type: application/json" \
             -d '{"limit": 1}')
           
@@ -355,63 +355,37 @@ jobs:
         env:
           CHAT_ID: ${{ steps.prep.outputs.CHAT_ID }}
         run: |
-          python3 << 'PYEOF'
-          import os, requests, time, glob, urllib3
-
-          urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
-
-          TOKEN = os.environ['BOT_TOKEN']
-          BASE_URL = os.environ['API_BASE_URL']
-          CHAT_ID = os.environ['CHAT_ID']
-
-          if not CHAT_ID:
-              print("Error: Chat ID not found.")
-              exit(1)
-
-          download_dirs = glob.glob('downloads/*')
-          if not download_dirs:
-              print("No download directory found.")
-              exit(1)
+          TOKEN="${{ env.BOT_TOKEN }}"
+          BASE_URL="${{ env.API_BASE_URL }}"
+          CHAT_ID="${{ env.CHAT_ID }}"
+          RAR_FILES=$(find downloads -name "S*.rar" | sort)
           
-          rar_files = []
-          for d in download_dirs:
-              rar_files.extend(glob.glob(f'{d}/S*.rar'))
-
-          if not rar_files:
-              print("No RAR files to send.")
-              exit(0)
+          if [ -z "$RAR_FILES" ]; then
+            echo "No RAR files found."
+            exit 0
+          fi
           
-          print(f"Found {len(rar_files)} RAR files to send.")
-
-          def send_file_to_rubika(file_path, chat_id):
-              file_name = os.path.basename(file_path)
-              file_size = os.path.getsize(file_path)
-              print(f"Uploading {file_name} ({file_size} bytes)...")
-
-              for attempt in range(3):
-                  try:
-                      with open(file_path, 'rb') as f:
-                          response = requests.post(
-                              f"{BASE_URL}/{TOKEN}/sendFile",
-                              files={'file': (file_name, f, 'application/x-rar-compressed')},
-                              data={'chat_id': chat_id, 'type': 'document'},
-                              verify=False,
-                              timeout=120
-                          )
-                      if response.status_code == 200:
-                          print(f"  File {file_name} sent successfully.")
-                          return True
-                      else:
-                          print(f"  Attempt {attempt+1}: Failed. Status: {response.status_code}, Response: {response.text}")
-                  except Exception as e:
-                      print(f"  Attempt {attempt+1}: Error: {e}")
-                  time.sleep(10)
-              print(f"  File {file_name} failed after 3 attempts.")
-              return False
-
-          for rar_file in sorted(rar_files):
-              send_file_to_rubika(rar_file, CHAT_ID)
-              time.sleep(2)
-
-          print("All files processed.")
-          PYEOF
+          for FILE in $RAR_FILES; do
+            FILENAME=$(basename "$FILE")
+            FILESIZE=$(stat -c%s "$FILE")
+            echo "Sending $FILENAME ($FILESIZE bytes)..."
+            for ATTEMPT in 1 2 3; do
+              RESPONSE=$(curl -k -s -w "%{http_code}" -X POST "$BASE_URL/$TOKEN/sendFile" \
+                -F "file=@$FILE;type=application/x-rar-compressed" \
+                -F "chat_id=$CHAT_ID" \
+                -F "type=document" \
+                --connect-timeout 30 \
+                --max-time 300 \
+                -o /dev/null)
+              if [ "$RESPONSE" = "200" ]; then
+                echo "  Attempt $ATTEMPT: Success"
+                break
+              else
+                echo "  Attempt $ATTEMPT: Failed (HTTP $RESPONSE)"
+                sleep 15
+              fi
+            done
+            sleep 3
+          done
+          echo "All files processed."
+          
