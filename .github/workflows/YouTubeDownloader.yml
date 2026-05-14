@@ -92,7 +92,7 @@ jobs:
           echo "URL=$URL" >> $GITHUB_OUTPUT
           echo "MODE=$MODE" >> $GITHUB_OUTPUT
 
-      - name: Run
+      - name: Run download and zip
         env:
           MODE: ${{ steps.prep.outputs.MODE }}
           URL: ${{ steps.prep.outputs.URL }}
@@ -363,7 +363,8 @@ jobs:
               print(f'Search results saved to {out}')
           PYEOF
 
-      - name: Push to repository
+      - name: Push to repository (optional)
+        continue-on-error: true
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "bot@github.com"
@@ -373,12 +374,11 @@ jobs:
             exit 0
           fi
           git commit -m "Add downloads $(date +%m%d-%H%M)"
-          for i in $(seq 1 5); do
-            if git pull --rebase --quiet 2>/dev/null && git push --quiet 2>/dev/null; then
-              exit 0
-            fi
-            git rebase --abort 2>/dev/null
-            sleep $((i*5))
-          done
-          echo "Push failed"
-          exit 1
+          git push || echo "Push failed (likely due to large files). Artifacts will be available."
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: youtube-downloads
+          path: downloads/
+          retention-days: 1
