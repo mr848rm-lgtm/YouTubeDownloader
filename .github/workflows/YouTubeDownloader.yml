@@ -1,4 +1,4 @@
-name: YouTube to Bale Bot via RAR
+name: YouTube to Bale Bot (RAR 20MB)
 
 on:
   workflow_dispatch:
@@ -222,7 +222,7 @@ jobs:
               sys.exit(1)
 
           archive_name = output_dir / 'playlist_archive.rar'
-          rar_cmd = ['rar', 'a', '-v50m', '-ep1', str(archive_name)] + [str(f) for f in downloaded_files]
+          rar_cmd = ['rar', 'a', '-v20m', '-ep1', str(archive_name)] + [str(f) for f in downloaded_files]
           subprocess.run(rar_cmd, check=True)
 
           for f in downloaded_files:
@@ -237,27 +237,43 @@ jobs:
           BALE_CHAT_ID: ${{ secrets.BALE_CHAT_ID }}
         run: |
           python3 << 'PYEOF'
-          import requests, os, glob
+          import requests, os, glob, sys
 
           BOT_TOKEN = os.environ['BALE_BOT_TOKEN']
           CHAT_ID = os.environ['BALE_CHAT_ID']
           BASE_URL = f'https://tapi.bale.ai/bot{BOT_TOKEN}'
 
-          files = sorted(glob.glob('downloads/*.rar'))
-          if not files:
-              print('No RAR files found.')
-              sys.exit(0)
-
-          for filepath in files:
-              print(f'Sending {filepath}...')
+          def send_document(filepath):
               with open(filepath, 'rb') as f:
                   response = requests.post(
                       f'{BASE_URL}/sendDocument',
                       data={'chat_id': CHAT_ID},
                       files={'document': f}
                   )
-                  if response.ok:
-                      print('  Sent successfully.')
-                  else:
-                      print(f'  Failed: {response.text}')
+                  return response
+
+          # Send list.txt first
+          list_file = 'downloads/list.txt'
+          if os.path.exists(list_file):
+              print(f'Sending {list_file}...')
+              resp = send_document(list_file)
+              if resp.ok:
+                  print('  list.txt sent.')
+              else:
+                  print(f'  Failed: {resp.text}')
+
+          # Send RAR parts
+          files = sorted(glob.glob('downloads/*.rar'))
+          if not files:
+              print('No RAR files found.')
+              sys.exit(0)
+
+          for filepath in files:
+              filesize = os.path.getsize(filepath) / (1024*1024)
+              print(f'Sending {filepath} ({filesize:.1f} MB)...')
+              resp = send_document(filepath)
+              if resp.ok:
+                  print('  OK')
+              else:
+                  print(f'  Failed: {resp.text}')
           PYEOF
