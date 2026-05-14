@@ -358,34 +358,42 @@ jobs:
           TOKEN="${{ env.BOT_TOKEN }}"
           BASE_URL="${{ env.API_BASE_URL }}"
           CHAT_ID="${{ env.CHAT_ID }}"
-          RAR_FILES=$(find downloads -name "S*.rar" | sort)
           
+          RAR_FILES=$(find downloads -name "S*.rar" | sort)
           if [ -z "$RAR_FILES" ]; then
             echo "No RAR files found."
             exit 0
           fi
           
-          for FILE in $RAR_FILES; do
-            FILENAME=$(basename "$FILE")
-            FILESIZE=$(stat -c%s "$FILE")
-            echo "Sending $FILENAME ($FILESIZE bytes)..."
-            for ATTEMPT in 1 2 3; do
-              RESPONSE=$(curl -k -s -w "%{http_code}" -X POST "$BASE_URL/$TOKEN/sendFile" \
-                -F "file=@$FILE;type=application/x-rar-compressed" \
-                -F "chat_id=$CHAT_ID" \
-                -F "type=document" \
-                --connect-timeout 30 \
-                --max-time 300 \
-                -o /dev/null)
-              if [ "$RESPONSE" = "200" ]; then
-                echo "  Attempt $ATTEMPT: Success"
-                break
-              else
-                echo "  Attempt $ATTEMPT: Failed (HTTP $RESPONSE)"
-                sleep 15
-              fi
+          CHUNK_SIZE_MB=45
+          mkdir -p chunks
+          
+          for RAR in $RAR_FILES; do
+            BASENAME=$(basename "$RAR" .rar)
+            echo "Splitting $BASENAME.rar into ${CHUNK_SIZE_MB}MB chunks..."
+            split -b ${CHUNK_SIZE_MB}M "$RAR" "chunks/${BASENAME}_part_"
+            
+            echo "Sending chunks..."
+            for CHUNK in chunks/${BASENAME}_part_*; do
+              CHUNKNAME=$(basename "$CHUNK")
+              echo -n "  Sending $CHUNKNAME ... "
+              for ATTEMPT in 1 2 3; do
+                RESPONSE=$(curl -k -s -w "%{http_code}" -X POST "$BASE_URL/$TOKEN/sendFile" \
+                  -F "file=@$CHUNK" \
+                  -F "chat_id=$CHAT_ID" \
+                  -F "type=document" \
+                  --connect-timeout 30 \
+                  --max-time 120 \
+                  -o /dev/null)
+                if [ "$RESPONSE" = "200" ]; then
+                  echo "Success"
+                  break
+                else
+                  echo "Failed (HTTP $RESPONSE)"
+                  sleep 10
+                fi
+              done
             done
-            sleep 3
+            rm -rf chunks
           done
           echo "All files processed."
-          
