@@ -65,13 +65,13 @@ jobs:
           path: ~/.cache/pip
           key: pip-${{ runner.os }}
 
-      - name: Install necessary tools
+      - name: Install tools
         run: |
           python3 -c "import requests" 2>/dev/null || pip3 install -q requests
           command -v yt-dlp &>/dev/null || pip3 install -q yt-dlp
           sudo apt-get update -qq && sudo apt-get install -y -qq rar wget
 
-      - name: Prepare URL and get Chat ID
+      - name: Prepare and get Chat ID
         id: prep
         run: |
           MODE="${{ github.event.inputs.mode }}"
@@ -86,20 +86,42 @@ jobs:
           echo "URL=$URL" >> $GITHUB_OUTPUT
           echo "MODE=$MODE" >> $GITHUB_OUTPUT
 
-          echo "Getting your Chat ID from Rubika..."
+          echo "Getting Chat ID from Rubika..."
+          
           RESPONSE=$(curl -s -X POST "${{ env.API_BASE_URL }}/${{ env.BOT_TOKEN }}/getUpdates" \
-            -H 'Content-Type: application/json' \
+            -H "Content-Type: application/json" \
             -d '{"limit": 1}')
           
-          CHAT_ID=$(echo "$RESPONSE" | python3 -c "import sys, json; data = json.load(sys.stdin); print(data['updates'][0]['chat_id'])")
-          if [ -z "$CHAT_ID" ] || [ "$CHAT_ID" == "null" ]; then
-            echo "::error::Could not get your Chat ID. Please send a message to your bot and try again."
+          echo "Raw API response:"
+          echo "$RESPONSE"
+          
+          CHAT_ID=$(python3 << 'PYEOF'
+          import sys, json
+          try:
+              data = json.loads(sys.argv[1])
+              if 'updates' in data and len(data['updates']) > 0:
+                  print(data['updates'][0]['chat_id'])
+              elif 'result' in data and len(data['result']) > 0:
+                  print(data['result'][0]['chat_id'])
+              elif 'data' in data and len(data['data']) > 0:
+                  print(data['data'][0]['chat_id'])
+              else:
+                  print('')
+          except:
+              print('')
+          PYEOF
+          "$RESPONSE")
+          
+          if [ -z "$CHAT_ID" ]; then
+            echo "Could not get Chat ID automatically."
+            echo "Please send any message to your bot first, then re-run this workflow."
             exit 1
           fi
+          
           echo "CHAT_ID=$CHAT_ID" >> $GITHUB_OUTPUT
-          echo "Chat ID successfully obtained: $CHAT_ID"
+          echo "Chat ID found: $CHAT_ID"
 
-      - name: Download videos and create RAR packages
+      - name: Download and create RAR files
         env:
           MODE: ${{ steps.prep.outputs.MODE }}
           URL: ${{ steps.prep.outputs.URL }}
@@ -113,7 +135,6 @@ jobs:
           python3 << 'PYEOF'
           import os, json, time, re, subprocess, sys, hashlib
           from pathlib import Path
-          from datetime import datetime
 
           MODE = os.environ['MODE']
           URL = os.environ['URL']
@@ -147,7 +168,7 @@ jobs:
                   s = hashlib.md5(title.encode()).hexdigest()[:16]
               return s
 
-          def get_channel_handle_from_url(url):
+          def get_channel_from_url(url):
               m = re.search(r'@([\w.-]+)', url)
               if m: return m.group(1)
               return None
@@ -248,7 +269,7 @@ jobs:
                   print('No videos in range.')
                   sys.exit(1)
 
-              channel_handle = get_channel_handle_from_url(URL) or 'playlist'
+              channel_handle = get_channel_from_url(URL) or 'playlist'
               folder_name = safe_name(channel_handle, 40)
               output_dir = Path(f'downloads/{folder_name}')
               output_dir.mkdir(parents=True, exist_ok=True)
@@ -268,7 +289,6 @@ jobs:
                       print('  Failed.')
                   time.sleep(1)
 
-              rar_base = output_dir / folder_name
               max_bytes = int(RAR_GB * 1024 * 1024 * 1024)
               current_size = 0
               part_num = 1
@@ -305,8 +325,35 @@ jobs:
 
               print(f'Done. RAR files created in {output_dir}')
 
-          else:
-              print(f'Mode {MODE} is not fully implemented in this example.')
+          elif MODE == 'single':
+              vid_match = re.search(r'(?:v=|/)([\w-]{11})', URL)
+              if not vid_match:
+                  print('Invalid URL'); sys.exit(1)
+              vid = vid_match.group(1)
+              channel = get_channel_from_url(URL) or 'video'
+              out = Path(f'downloads/{safe_name(channel)}')
+              out.mkdir(parents=True, exist_ok=True)
+              ext = 'mp3' if TYPE == 'audio' else 'mp4'
+              filename = f"E1 - {safe_filename(vid)}.{ext}"
+              filepath = download_video(URL, filename, out)
+              if filepath:
+                  rar_path = out / 'S1.rar'
+                  subprocess.run(['rar', 'a', '-m0', '-v1g', str(rar_path), str(filepath.resolve())], check=True)
+                  filepath.unlink()
+                  print('Done.')
+
+          elif MODE == 'search':
+              query = URL
+              limit = MAX if MAX > 0 else 10
+              videos = collect_videos(f'ytsearch{limit}:{query}', limit)
+              if not videos:
+                  print('No results.'); sys.exit(1)
+              out = Path(f'downloads/search_{safe_name(query)}')
+              out.mkdir(parents=True, exist_ok=True)
+              lines = []
+              for i, v in enumerate(videos, 1):
+                  lines.append(f'{v["title"]}\nE{i} = {v["url"]}')
+              (out / f'search_{safe_name(query)}.txt').write_text('\n'.join(lines), encoding='utf-8')
           PYEOF
 
       - name: Send RAR files to Rubika
@@ -346,7 +393,7 @@ jobs:
 
               with open(file_path, 'rb') as f:
                   response = requests.post(
-                      f"{BASE_URL}/{TOKEN}/requestSendFile",
+                      f"{BASE_URL}/{TOKEN}/sendFile",
                       files={'file': (file_name, f, 'application/x-rar-compressed')},
                       data={'chat_id': chat_id, 'type': 'document'}
                   )
