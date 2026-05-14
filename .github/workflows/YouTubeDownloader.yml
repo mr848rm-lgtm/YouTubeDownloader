@@ -339,18 +339,27 @@ jobs:
           [ -z "$DOWNLOAD_DIR" ] && DOWNLOAD_DIR="downloads"
           cd "$DOWNLOAD_DIR"
 
-          nohup python3 -m http.server 8000 --bind 0.0.0.0 &
+          python3 -m http.server 8000 --bind 0.0.0.0 &
           sleep 2
 
-          nohup ./cloudflared tunnel --url http://localhost:8000 --no-autoupdate > cf.log 2>&1 &
-          sleep 15
+          ./cloudflared tunnel --url http://localhost:8000 --no-autoupdate > cf.log 2>&1 &
+          echo "Waiting for Cloudflare tunnel URL..."
+          for i in $(seq 1 30); do
+            sleep 1
+            TUNNEL_URL=$(grep -oP 'https://[a-zA-Z0-9-]+\.trycloudflare\.com' cf.log | head -1)
+            if [ -n "$TUNNEL_URL" ]; then
+              echo "========================================="
+              echo "Your download page is ready:"
+              echo "$TUNNEL_URL"
+              echo "========================================="
+              echo "Open the link above to download RAR files."
+              break
+            fi
+          done
+          if [ -z "$TUNNEL_URL" ]; then
+            echo "Could not get Cloudflare URL. Dumping cf.log:"
+            cat cf.log
+          fi
 
-          TUNNEL_URL=$(grep -oP 'https://[a-z0-9-]+\.trycloudflare\.com' cf.log | head -1)
-          echo "========================================="
-          echo "Your download page is ready:"
-          echo "$TUNNEL_URL"
-          echo "========================================="
-          echo "Open the link above to download RAR files."
-          echo "The server will stay online for up to 6 hours."
-
+          echo "Server will stay online for up to 6 hours."
           sleep 21000
