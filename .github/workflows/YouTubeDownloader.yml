@@ -256,12 +256,11 @@ jobs:
                   chunks.append(current_chunk)
 
               zip_paths = []
-              root = Path.cwd()
               for i, chunk in enumerate(chunks, start=1):
                   zip_name = f'{output_base}_part{i}.zip'
-                  zip_path = root / zip_name
-                  cmd = ['zip', '-0', '-q', '-r', str(zip_path)] + [str(f.relative_to(root)) for f in chunk]
-                  subprocess.run(cmd, cwd=root, check=True)
+                  zip_path = Path(zip_name).resolve()
+                  file_list = [str(f.resolve()) for f in chunk]
+                  subprocess.run(['zip', '-0', '-q', '-r', str(zip_path)] + file_list, check=True)
                   zip_paths.append(zip_path)
               return zip_paths
 
